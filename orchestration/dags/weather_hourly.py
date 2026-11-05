@@ -15,7 +15,7 @@ from datetime import timedelta
 
 import pendulum
 from airflow.sdk import CronTriggerTimetable, dag, task
-from alacati_runtime import DBT_PYTHON, INGEST_BIN, RUN_DBT, run_cli
+from alacati_runtime import DBT_PYTHON, INGEST_BIN, RUN_DBT, notify_failure, run_cli
 
 log = logging.getLogger(__name__)
 
@@ -23,13 +23,28 @@ log = logging.getLogger(__name__)
 # Minute 5 of every hour (UTC): a few minutes past the hour, off the busy :00 mark.
 HOURLY_CRON = "5 * * * *"
 SCHEDULE_TIMEZONE = "UTC"
-# A run must finish well before the next one starts.
+# Time budget. A run must finish before the next hourly slot, so DAGRUN_TIMEOUT is 55 min,
+# and the per-task limits are sized so that the worst case still fits inside it:
+#   ingest     2 attempts * 8 min + 1 retry delay of 2 min = 18 min
+#   dbt_build  2 attempts * 12 min + 1 retry delay of 2 min = 26 min
+#   freshness  1 attempt  * 4 min (retries=0)               =  4 min
+#   total                                                    = 48 min (+ scheduling slack)
+# Typical durations (Nov 2026): ingest ~20 s, dbt build ~1 min, freshness ~5 s, so the
+# limits are still >= 10x the normal run time. The check below fails DAG parsing (import
+# error in the UI) if someone raises a task limit without raising DAGRUN_TIMEOUT.
 DAGRUN_TIMEOUT = timedelta(minutes=55)
+RETRIES = 1
+RETRY_DELAY = timedelta(minutes=2)
 # Per-task hard limits (Airflow) and the slightly shorter subprocess watchdogs.
-INGEST_TIMEOUT = timedelta(minutes=20)
-DBT_BUILD_TIMEOUT = timedelta(minutes=30)
-FRESHNESS_TIMEOUT = timedelta(minutes=10)
+INGEST_TIMEOUT = timedelta(minutes=8)
+DBT_BUILD_TIMEOUT = timedelta(minutes=12)
+FRESHNESS_TIMEOUT = timedelta(minutes=4)
 WATCHDOG_MARGIN = timedelta(minutes=2)
+_WORST_CASE = (
+    (RETRIES + 1) * (INGEST_TIMEOUT + DBT_BUILD_TIMEOUT) + 2 * RETRIES * RETRY_DELAY + FRESHNESS_TIMEOUT
+)
+if DAGRUN_TIMEOUT < _WORST_CASE:
+    raise ValueError(f"DAGRUN_TIMEOUT {DAGRUN_TIMEOUT} < worst-case task time {_WORST_CASE}")
 
 # alacati-ingest run exit codes (ingestion/src/alacati_ingestion/cli.py).
 INGEST_COMPLETE = 0
@@ -43,7 +58,10 @@ INGEST_PARTIAL = 2
     catchup=False,
     max_active_runs=1,
     dagrun_timeout=DAGRUN_TIMEOUT,
-    default_args={"retries": 1, "retry_delay": timedelta(minutes=5)},
+    default_args={"retries": RETRIES, "retry_delay": RETRY_DELAY},
+    # One Telegram message per failed run (after retries), sent from the dag-processor.
+    # Ingest exit 2 (partial) is not a failure and sends nothing.
+    on_failure_callback=notify_failure,
     tags=["alacati", "ingestion", "dbt"],
     doc_md=__doc__,
 )

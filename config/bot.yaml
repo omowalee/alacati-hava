@@ -1,0 +1,27 @@
+# Telegram bot and morning summary parameters.
+
+version: 1
+
+commands:
+  evening_switch_local_hour: 19   # after this hour /plaj shows tomorrow's beaches
+  top_beaches: 5                  # /plaj list length
+  wind_span_hours: 12             # /ruzgar look-ahead
+  wind_step_hours: 3              # /ruzgar step between rows
+  surf_window_hours: 24           # /ruzgar lists surf windows starting within this many hours
+
+summary:
+  top_beaches: 3
+  stale_after_local_hour: 12      # a missed 08:00 summary is not sent after this hour
+  record_retries: 4               # retries for writing ops.summary_log after a successful send
+  record_backoff_s: 5
+
+data:
+  max_age_hours: 3                # latest forecast older than this -> "veri eski" warning
+  cache_ttl_minutes: 10
+  query_timeout_s: 30
+
+limits:
+  rate_limit_commands: 10         # per chat ...
+  rate_limit_window_s: 60         # ... per this many seconds
+  telegram_max_chars: 4096        # Telegram message limit; longer text is truncated
+  telegram_timeout_s: 30          # connect/read/write timeout for Telegram API calls

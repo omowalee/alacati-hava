@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
-from typing import Any
+import asyncio
+from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from alacati_bot import bot, settings
 from alacati_bot.messages import (
-    NO_ALERTS,
+    RATE_LIMIT_TEXT,
     Row,
     format_summary,
     help_text,
+    no_alerts_text,
     target_beach_day,
+    truncate_message,
 )
+from alacati_bot.ratelimit import RateLimiter, Verdict
 from alacati_bot.store import TTLCache
 from alacati_bot.summary import run_summary
 
 CFG = settings.load_config()
 NOW = datetime(2026, 11, 5, 10, 0)  # local
+FRESH = datetime(2026, 11, 5, 6, 0, tzinfo=UTC)  # 09:00 local, 1 h before NOW
+NO_ALERTS = no_alerts_text(CFG)
 
 
 class FakeStore:
@@ -30,6 +37,9 @@ class FakeStore:
         self.wind: list[Row] = kw.get("wind", [])
         self.windows: list[Row] = kw.get("windows", [])
         self.run_id: str | None = kw.get("run_id", "run-1")
+        self.fetched: datetime | None = kw.get("fetched", FRESH)
+        self.record_failures: int = kw.get("record_failures", 0)  # -1 = always fail
+        self.record_calls = 0
         self.sent: set[tuple[date, str]] = set()
         self.records: list[tuple[date, str, int | None, str]] = []
         self.beach_days: list[date] = []
@@ -53,6 +63,9 @@ class FakeStore:
     def forecast_run_id(self) -> str | None:
         return self.run_id
 
+    def latest_fetched_at(self) -> datetime | None:
+        return self.fetched
+
     def summary_sent(self, summary_date: date, chat_id: str) -> bool:
         return (summary_date, chat_id) in self.sent
 
@@ -64,6 +77,9 @@ class FakeStore:
         message_id: int | None,
         forecast_run_id: str,
     ) -> None:
+        self.record_calls += 1
+        if self.record_failures < 0 or self.record_calls <= self.record_failures:
+            raise RuntimeError("bigquery down")
         self.sent.add((summary_date, chat_id))
         self.records.append((summary_date, chat_id, message_id, forecast_run_id))
 
@@ -166,8 +182,8 @@ def test_beaches_empty_and_full() -> None:
 
 
 def test_after_19_switches_to_tomorrow() -> None:
-    assert target_beach_day(datetime(2026, 11, 5, 18, 59)) == (date(2026, 11, 5), False)
-    assert target_beach_day(datetime(2026, 11, 5, 19, 0)) == (date(2026, 11, 6), True)
+    assert target_beach_day(datetime(2026, 11, 5, 18, 59), CFG) == (date(2026, 11, 5), False)
+    assert target_beach_day(datetime(2026, 11, 5, 19, 0), CFG) == (date(2026, 11, 6), True)
     store = FakeStore(beaches=_beaches())
     text = bot.reply_beaches(store, CFG, datetime(2026, 11, 5, 21, 0))
     assert store.beach_days == [date(2026, 11, 6)]
@@ -225,7 +241,7 @@ def test_summary_local_date_uses_istanbul() -> None:
 
 def test_summary_no_run_id_is_error() -> None:
     store, sender = FakeStore(run_id=None), FakeSender()
-    assert run_summary(store, sender, CFG, "1", datetime.now(UTC)) == 1
+    assert run_summary(store, sender, CFG, "1", datetime(2026, 11, 5, 5, 0, tzinfo=UTC)) == 1
     assert not sender.messages and not store.records
 
 
@@ -236,7 +252,7 @@ def test_summary_send_failure_not_recorded() -> None:
 
     store = FakeStore()
     with pytest.raises(RuntimeError):
-        run_summary(store, Boom(), CFG, "1", datetime.now(UTC))
+        run_summary(store, Boom(), CFG, "1", datetime(2026, 11, 5, 5, 0, tzinfo=UTC))
     assert not store.records
 
 
@@ -261,3 +277,130 @@ def test_ttl_cache() -> None:
     assert cache.get_or_set("k", fn) == 1
     t[0] = 601
     assert cache.get_or_set("k", fn) == 2
+
+
+# --- review fixes ---------------------------------------------------------------------
+
+EARLY = datetime(2026, 11, 5, 5, 0, tzinfo=UTC)  # 08:00 local
+
+
+def test_record_fails_then_succeeds_sends_once() -> None:
+    store, sender = FakeStore(record_failures=2), FakeSender()
+    sleeps: list[float] = []
+    assert run_summary(store, sender, CFG, "1", EARLY, sleep=sleeps.append) == 0
+    assert len(sender.messages) == 1
+    assert store.record_calls == 3
+    assert sleeps == [CFG.params.record_backoff_s] * 2
+
+
+def test_record_always_fails_returns_3_and_sends_once() -> None:
+    store, sender = FakeStore(record_failures=-1), FakeSender()
+    sleeps: list[float] = []
+    assert run_summary(store, sender, CFG, "1", EARLY, sleep=sleeps.append) == 3
+    assert len(sender.messages) == 1
+    assert store.record_calls == CFG.params.record_retries + 1
+
+
+def test_send_timeout_is_not_resent() -> None:
+    calls: list[str] = []
+
+    class Slow:
+        def send(self, chat_id: str, text: str) -> int | None:
+            calls.append(text)
+            raise TimeoutError("read timeout")
+
+    store = FakeStore()
+    with pytest.raises(TimeoutError):
+        run_summary(store, Slow(), CFG, "1", EARLY)
+    assert len(calls) == 1 and not store.records
+
+
+def test_summary_too_late_not_sent() -> None:
+    store, sender = FakeStore(), FakeSender()
+    late = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)  # 13:00 local
+    assert run_summary(store, sender, CFG, "1", late) == 0
+    assert not sender.messages
+
+
+def test_stale_warning_on_every_reply() -> None:
+    old = datetime(2026, 11, 5, 11, 0, tzinfo=UTC)  # 14:00 local
+    now = datetime(2026, 11, 5, 18, 30)
+    store = FakeStore(fetched=old, beaches=_beaches(), wind=_wind())
+    for fn in (bot.reply_alerts, bot.reply_beaches, bot.reply_wind):
+        text = fn(store, CFG, now)
+        assert text.startswith("⚠️ Veriler güncel değil (son güncelleme: 05.11 14:00)")
+        _assert_footer(text)
+    fresh = bot.reply_alerts(FakeStore(), CFG, NOW)
+    assert "Veriler güncel değil" not in fresh
+
+
+def test_stale_warning_in_summary() -> None:
+    store, sender = FakeStore(fetched=FRESH - timedelta(hours=10)), FakeSender()
+    assert run_summary(store, sender, CFG, "1", EARLY) == 0
+    assert sender.messages[0].startswith("⚠️ Veriler güncel değil")
+
+
+def test_missing_fetch_time_warns() -> None:
+    assert "Veriler güncel değil" in bot.reply_alerts(FakeStore(fetched=None), CFG, NOW)
+
+
+def test_rate_limiter_notifies_once_then_ignores() -> None:
+    t = [0.0]
+    lim = RateLimiter(3, 60, clock=lambda: t[0])
+    assert [lim.check(1) for _ in range(3)] == [Verdict.ALLOW] * 3
+    assert lim.check(1) is Verdict.NOTIFY
+    assert lim.check(1) is Verdict.IGNORE
+    assert lim.check(2) is Verdict.ALLOW  # other chats unaffected
+    t[0] = 61
+    assert lim.check(1) is Verdict.ALLOW
+
+
+def _update(chat_id: int, sent: list[str]) -> Any:
+    async def reply_text(text: str, **kw: Any) -> None:
+        sent.append(text)
+
+    return SimpleNamespace(
+        message=SimpleNamespace(reply_text=reply_text), effective_chat=SimpleNamespace(id=chat_id)
+    )
+
+
+def test_handler_rate_limit_replies_once() -> None:
+    lim = RateLimiter(2, 60)
+    handler = bot._make_handler(bot.reply_alerts, FakeStore(), CFG, lim)
+    sent: list[str] = []
+    for _ in range(5):
+        asyncio.run(handler(_update(7, sent), cast(Any, None)))
+    assert len(sent) == 3
+    assert RATE_LIMIT_TEXT in sent[2]
+    _assert_footer(sent[2])
+
+
+def test_handler_error_and_timeout_give_generic_text() -> None:
+    class Broken(FakeStore):
+        def active_alerts(self) -> list[Row]:
+            raise RuntimeError("bq down")
+
+    sent: list[str] = []
+    handler = bot._make_handler(bot.reply_alerts, Broken(), CFG, RateLimiter(10, 60))
+    asyncio.run(handler(_update(1, sent), cast(Any, None)))
+    assert "veriye ulaşamadım" in sent[0]
+    _assert_footer(sent[0])
+
+
+def test_truncate_keeps_footer_and_tags() -> None:
+    rows = [f"<b>Satır {i}</b> " + "x" * 100 for i in range(100)]
+    body = "<i>\n" + "\n".join(rows)
+    text = body + "\n\n<i>" + CFG.disclaimer + "</i>\n" + CFG.attribution
+    out = truncate_message(text, CFG)
+    assert len(out) <= CFG.params.telegram_max_chars
+    _assert_footer(out)
+    assert out.count("<i>") == out.count("</i>")
+    assert out.count("<b>") == out.count("</b>")
+    assert truncate_message("kısa", CFG) == "kısa"
+
+
+def test_truncate_real_message() -> None:
+    events = [_event() for _ in range(80)]
+    out = bot.reply_alerts(FakeStore(events=events), CFG, NOW)
+    assert len(out) <= CFG.params.telegram_max_chars
+    _assert_footer(out)

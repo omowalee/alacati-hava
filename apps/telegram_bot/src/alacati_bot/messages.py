@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from html import escape as _escape
 from typing import Any, Protocol
@@ -27,11 +28,8 @@ def escape(text: str) -> str:
     return _escape(text, quote=False)
 
 
-EVENING_SWITCH_HOUR = 19
-NO_ALERTS = "Önümüzdeki 48 saatte uyarı yok ✅"
 ERROR_TEXT = "Şu an veriye ulaşamadım, lütfen biraz sonra tekrar dene."
-WIND_STEP_HOURS = 3
-WIND_SPAN_HOURS = 12
+RATE_LIMIT_TEXT = "Çok fazla istek gönderdiniz, lütfen biraz bekleyin."
 
 
 class DataStore(Protocol):
@@ -43,6 +41,63 @@ class DataStore(Protocol):
     def wind_series(self, location_id: str, hours: int) -> list[Row]: ...
     def surf_windows(self, spot_id: str, hours: int) -> list[Row]: ...
     def forecast_run_id(self) -> str | None: ...
+    def latest_fetched_at(self) -> datetime | None: ...
+
+
+def no_alerts_text(cfg: BotConfig) -> str:
+    return f"Önümüzdeki {cfg.horizon_hours} saatte uyarı yok ✅"
+
+
+def stale_notice(store: DataStore, cfg: BotConfig, now_local: datetime) -> str:
+    """Turkish warning if the newest forecast is older than data.max_age_hours, else ''."""
+    fetched = store.latest_fetched_at()
+    if fetched is None:
+        return "⚠️ Veriler güncel değil (güncelleme bilgisi bulunamadı)"
+    local = to_local(fetched)
+    if now_local - local > timedelta(hours=cfg.params.max_age_hours):
+        return f"⚠️ Veriler güncel değil (son güncelleme: {local:%d.%m %H:%M})"
+    return ""
+
+
+def with_notice(body: str, notice: str) -> str:
+    return f"{notice}\n\n{body}" if notice else body
+
+
+_TAG = re.compile(r"<(/?)([a-z]+)[^>]*>")
+
+
+def truncate_message(text: str, cfg: BotConfig) -> str:
+    """Fit text into telegram_max_chars: cut the body at a line boundary, keep the footer.
+
+    Tags never span lines in our messages, so a line-boundary cut cannot split a tag; any
+    tag left open by a cut is closed explicitly.
+    """
+    limit = cfg.params.telegram_max_chars
+    if len(text) <= limit:
+        return text
+    tail = footer(cfg)
+    if text.endswith(tail):
+        body = text[: -len(tail)]
+    else:
+        body, tail = text, ""
+    mark = "\n…"
+    room = max(limit - len(tail) - len(mark) - 16, 0)  # 16: slack for closing tags
+    cut = body[:room]
+    nl = cut.rfind("\n")
+    cut = cut[:nl] if nl > 0 else cut
+    if cut.rfind("<") > cut.rfind(">"):  # no newline available: drop a dangling tag start
+        cut = cut[: cut.rfind("<")]
+    if cut.rfind("&") > cut.rfind(";"):
+        cut = cut[: cut.rfind("&")]
+    stack: list[str] = []
+    for m in _TAG.finditer(cut):
+        if m.group(1):
+            if stack and stack[-1] == m.group(2):
+                stack.pop()
+        else:
+            stack.append(m.group(2))
+    closing = "".join(f"</{t}>" for t in reversed(stack))
+    return cut + closing + mark + tail
 
 
 def footer(cfg: BotConfig) -> str:
@@ -54,9 +109,9 @@ def with_footer(body: str, cfg: BotConfig) -> str:
     return body + footer(cfg)
 
 
-def target_beach_day(now_local: datetime) -> tuple[date, bool]:
-    """Day to rank beaches for; after 19:00 local it is tomorrow. Returns (day, is_tomorrow)."""
-    if now_local.hour >= EVENING_SWITCH_HOUR:
+def target_beach_day(now_local: datetime, cfg: BotConfig) -> tuple[date, bool]:
+    """Day to rank beaches for; from the evening switch hour on it is tomorrow."""
+    if now_local.hour >= cfg.params.evening_switch_hour:
         return now_local.date() + timedelta(days=1), True
     return now_local.date(), False
 
@@ -67,10 +122,10 @@ def help_text(cfg: BotConfig) -> str:
         "Çeşme yarımadası için şiddetli hava uyarıları, plaj önerileri ve "
         "Alaçatı rüzgâr durumu.\n\n"
         "/uyari – aktif ve yaklaşan uyarılar\n"
-        "/plaj – rüzgârdan en korunaklı 5 plaj\n"
+        f"/plaj – rüzgârdan en korunaklı {cfg.params.top_beaches} plaj\n"
         "/ruzgar – Alaçatı rüzgâr tahmini\n"
         "/yardim – bu mesaj\n\n"
-        "Her sabah 08:00'de günlük özet gönderilir."
+        "Her sabah günlük özet gönderilir."
     )
     return with_footer(body, cfg)
 
@@ -104,7 +159,7 @@ def _alert_line(row: Row, cfg: BotConfig, start: datetime, end: datetime, today:
 def format_alerts_section(
     active: list[Row], events: list[Row], cfg: BotConfig, now_local: datetime
 ) -> str:
-    """Alert blocks (active + upcoming); NO_ALERTS if both are empty."""
+    """Alert blocks (active + upcoming); no_alerts_text if both are empty."""
     today = now_local.date()
     blocks: list[str] = []
     if active:
@@ -112,13 +167,13 @@ def format_alerts_section(
         for r in active:
             blocks.append(_alert_line(r, cfg, r["start_local"], r["end_local"], today))
     if events:
-        blocks.append("<b>Yaklaşan (48 saat)</b>")
+        blocks.append(f"<b>Yaklaşan ({cfg.horizon_hours} saat)</b>")
         for r in events:
             blocks.append(
                 _alert_line(r, cfg, to_local(r["start_utc"]), to_local(r["end_utc"]), today)
             )
     if not blocks:
-        return NO_ALERTS
+        return no_alerts_text(cfg)
     return "\n\n".join(blocks)
 
 
@@ -161,9 +216,10 @@ def _wind_line(r: Row) -> str:
     return line
 
 
-def pick_wind_steps(series: list[Row]) -> list[Row]:
-    """Every WIND_STEP_HOURS-th row within WIND_SPAN_HOURS (series is hourly, sorted)."""
-    return [r for i, r in enumerate(series) if i % WIND_STEP_HOURS == 0 and i <= WIND_SPAN_HOURS]
+def pick_wind_steps(series: list[Row], cfg: BotConfig) -> list[Row]:
+    """Every wind_step_hours-th row within wind_span_hours (series is hourly, sorted)."""
+    step, span = cfg.params.wind_step_hours, cfg.params.wind_span_hours
+    return [r for i, r in enumerate(series) if i % step == 0 and i <= span]
 
 
 def format_windows(windows: list[Row], today: date) -> list[str]:
@@ -176,9 +232,11 @@ def format_windows(windows: list[Row], today: date) -> list[str]:
     return lines
 
 
-def format_wind_section(series: list[Row], windows: list[Row], now_local: datetime) -> str:
-    steps = pick_wind_steps(series)
-    parts = ["<b>Alaçatı rüzgâr (12 saat)</b>"]
+def format_wind_section(
+    series: list[Row], windows: list[Row], cfg: BotConfig, now_local: datetime
+) -> str:
+    steps = pick_wind_steps(series, cfg)
+    parts = [f"<b>Alaçatı rüzgâr ({cfg.params.wind_span_hours} saat)</b>"]
     parts.append("\n".join(_wind_line(r) for r in steps) if steps else "Rüzgâr verisi yok.")
     parts.append("<b>Yaklaşan uygun saatler</b>")
     wl = format_windows(windows, now_local.date())
@@ -187,7 +245,7 @@ def format_wind_section(series: list[Row], windows: list[Row], now_local: dateti
 
 
 def format_wind(series: list[Row], windows: list[Row], cfg: BotConfig, now_local: datetime) -> str:
-    return with_footer(format_wind_section(series, windows, now_local), cfg)
+    return with_footer(format_wind_section(series, windows, cfg, now_local), cfg)
 
 
 def format_summary(
@@ -199,17 +257,21 @@ def format_summary(
     cfg: BotConfig,
     now_local: datetime,
 ) -> str:
-    """Morning summary: today's alerts, top 3 beaches, Alaçatı wind."""
+    """Morning summary: today's alerts, top beaches, Alaçatı wind."""
     end_of_today = datetime.combine(now_local.date() + timedelta(days=1), datetime.min.time())
     todays = [e for e in events if to_local(e["start_utc"]) < end_of_today]
     alerts = format_alerts_section(active, todays, cfg, now_local)
-    if alerts == NO_ALERTS:
+    if alerts == no_alerts_text(cfg):
         alerts = "Bugün uyarı yok ✅"
-    beach = "\n".join(_beach_lines(beaches[:3])) if beaches else "Plaj verisi henüz yok."
+    beach = (
+        "\n".join(_beach_lines(beaches[: cfg.params.summary_top_beaches]))
+        if beaches
+        else "Plaj verisi henüz yok."
+    )
     body = (
         f"<b>☀️ Günaydın! {now_local:%d.%m.%Y} özeti</b>\n\n"
         f"<b>Uyarılar</b>\n{alerts}\n\n"
         f"<b>En iyi plajlar</b>\n{beach}\n\n"
-        f"{format_wind_section(series, windows, now_local)}"
+        f"{format_wind_section(series, windows, cfg, now_local)}"
     )
     return with_footer(body, cfg)

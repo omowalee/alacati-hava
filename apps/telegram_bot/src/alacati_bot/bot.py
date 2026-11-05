@@ -16,14 +16,19 @@ from . import settings
 from .formatting import TZ
 from .messages import (
     ERROR_TEXT,
+    RATE_LIMIT_TEXT,
     DataStore,
     format_alerts,
     format_beaches,
     format_wind,
     help_text,
+    stale_notice,
     target_beach_day,
+    truncate_message,
     with_footer,
+    with_notice,
 )
+from .ratelimit import RateLimiter, Verdict
 
 log = logging.getLogger("alacati_bot")
 
@@ -34,31 +39,55 @@ def now_local() -> datetime:
     return datetime.now(UTC).astimezone(TZ).replace(tzinfo=None)
 
 
+def _finish(body: str, store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
+    """Prefix the stale-data warning (if any) and fit the Telegram length limit."""
+    return truncate_message(with_notice(body, stale_notice(store, cfg, now)), cfg)
+
+
 def reply_alerts(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
-    return format_alerts(store.active_alerts(), store.upcoming_events(cfg.horizon_hours), cfg, now)
+    body = format_alerts(store.active_alerts(), store.upcoming_events(cfg.horizon_hours), cfg, now)
+    return _finish(body, store, cfg, now)
 
 
 def reply_beaches(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
-    day, tomorrow = target_beach_day(now)
-    return format_beaches(store.beach_top(day, 5), tomorrow, cfg)
+    day, tomorrow = target_beach_day(now, cfg)
+    body = format_beaches(store.beach_top(day, cfg.params.top_beaches), tomorrow, cfg)
+    return _finish(body, store, cfg, now)
 
 
 def reply_wind(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
-    spot = cfg.surf_spot_id
-    return format_wind(store.wind_series(spot, 13), store.surf_windows(spot, 24), cfg, now)
+    spot, p = cfg.surf_spot_id, cfg.params
+    series = store.wind_series(spot, p.wind_span_hours + 1)
+    body = format_wind(series, store.surf_windows(spot, p.surf_window_hours), cfg, now)
+    return _finish(body, store, cfg, now)
+
+
+def reply_help(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
+    return help_text(cfg)
 
 
 def _make_handler(
-    build: Builder, store: DataStore, cfg: settings.BotConfig
+    build: Builder, store: DataStore, cfg: settings.BotConfig, limiter: RateLimiter
 ) -> Callable[[Update, ContextTypes.DEFAULT_TYPE], Any]:
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None:
             return
-        try:
-            text = await asyncio.to_thread(build, store, cfg, now_local())
-        except Exception:
-            log.exception("command failed")
-            text = with_footer(ERROR_TEXT, cfg)
+        chat = update.effective_chat
+        verdict = limiter.check(chat.id if chat else 0)
+        if verdict is Verdict.IGNORE:
+            return
+        if verdict is Verdict.NOTIFY:
+            text = with_footer(RATE_LIMIT_TEXT, cfg)
+        else:
+            try:
+                # The thread cannot be killed, but every BigQuery call has its own timeout.
+                text = await asyncio.wait_for(
+                    asyncio.to_thread(build, store, cfg, now_local()),
+                    timeout=cfg.params.query_timeout_s,
+                )
+            except Exception:  # includes TimeoutError
+                log.exception("command failed")
+                text = with_footer(ERROR_TEXT, cfg)
         await update.message.reply_text(
             text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
@@ -67,18 +96,19 @@ def _make_handler(
 
 
 def build_application(
-    token: str, store: DataStore, cfg: settings.BotConfig
+    token: str,
+    store: DataStore,
+    cfg: settings.BotConfig,
+    limiter: RateLimiter | None = None,
 ) -> Application[Any, Any, Any, Any, Any, Any]:
     app = Application.builder().token(token).build()
+    p = cfg.params
+    lim = limiter or RateLimiter(p.rate_limit_commands, p.rate_limit_window_s)
 
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if update.message is not None:
-            await update.message.reply_text(help_text(cfg), parse_mode=ParseMode.HTML)
-
-    app.add_handler(CommandHandler(["start", "yardim"], start))
-    app.add_handler(CommandHandler("uyari", _make_handler(reply_alerts, store, cfg)))
-    app.add_handler(CommandHandler("plaj", _make_handler(reply_beaches, store, cfg)))
-    app.add_handler(CommandHandler("ruzgar", _make_handler(reply_wind, store, cfg)))
+    app.add_handler(CommandHandler(["start", "yardim"], _make_handler(reply_help, store, cfg, lim)))
+    app.add_handler(CommandHandler("uyari", _make_handler(reply_alerts, store, cfg, lim)))
+    app.add_handler(CommandHandler("plaj", _make_handler(reply_beaches, store, cfg, lim)))
+    app.add_handler(CommandHandler("ruzgar", _make_handler(reply_wind, store, cfg, lim)))
     return app
 
 
@@ -96,6 +126,6 @@ def main() -> None:
     from .store import BigQueryStore
 
     cfg = settings.load_config()
-    app = build_application(env.token, BigQueryStore(env), cfg)
+    app = build_application(env.token, BigQueryStore(env, cfg.params), cfg)
     log.info("bot starting (long polling)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

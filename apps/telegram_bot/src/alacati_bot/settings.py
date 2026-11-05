@@ -34,12 +34,58 @@ def _load_yaml(directory: Path, name: str) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class BotParams:
+    """Parameters from config/bot.yaml."""
+
+    evening_switch_hour: int
+    top_beaches: int
+    wind_span_hours: int
+    wind_step_hours: int
+    surf_window_hours: int
+    summary_top_beaches: int
+    summary_stale_after_hour: int
+    record_retries: int
+    record_backoff_s: float
+    max_age_hours: float
+    cache_ttl_minutes: float
+    query_timeout_s: float
+    rate_limit_commands: int
+    rate_limit_window_s: float
+    telegram_max_chars: int
+    telegram_timeout_s: float
+
+    @classmethod
+    def from_yaml(cls, data: dict[str, Any]) -> BotParams:
+        """Build from the parsed bot.yaml. Optional keys fall back to documented defaults."""
+        c, s, d, lim = data["commands"], data["summary"], data["data"], data["limits"]
+        return cls(
+            evening_switch_hour=int(c["evening_switch_local_hour"]),
+            top_beaches=int(c["top_beaches"]),
+            wind_span_hours=int(c["wind_span_hours"]),
+            wind_step_hours=int(c["wind_step_hours"]),
+            surf_window_hours=int(c.get("surf_window_hours", 24)),
+            summary_top_beaches=int(s["top_beaches"]),
+            summary_stale_after_hour=int(s["stale_after_local_hour"]),
+            record_retries=int(s["record_retries"]),
+            record_backoff_s=float(s["record_backoff_s"]),
+            max_age_hours=float(d["max_age_hours"]),
+            cache_ttl_minutes=float(d["cache_ttl_minutes"]),
+            query_timeout_s=float(d["query_timeout_s"]),
+            rate_limit_commands=int(lim["rate_limit_commands"]),
+            rate_limit_window_s=float(lim["rate_limit_window_s"]),
+            telegram_max_chars=int(lim["telegram_max_chars"]),
+            telegram_timeout_s=float(lim.get("telegram_timeout_s", 30)),
+        )
+
+
+@dataclass(frozen=True)
 class BotConfig:
     """The parts of config/ the bot needs."""
 
     alerts: dict[str, Any]
     locations: dict[str, Any]
     surf: dict[str, Any]
+    params: BotParams
 
     @property
     def horizon_hours(self) -> int:
@@ -71,12 +117,13 @@ class BotConfig:
 
 
 def load_config(directory: Path | None = None) -> BotConfig:
-    """Read alerts, locations and surf YAML files."""
+    """Read alerts, locations, surf and bot YAML files."""
     d = directory or config_dir()
     return BotConfig(
         alerts=_load_yaml(d, "alerts.yaml"),
         locations=_load_yaml(d, "locations.yaml"),
         surf=_load_yaml(d, "surf.yaml"),
+        params=BotParams.from_yaml(_load_yaml(d, "bot.yaml")),
     )
 
 

@@ -5,7 +5,8 @@
 # Stop:             docker compose stop        (containers stay; `start` resumes)
 # See docs/laptop-server.md for the laptop-as-server setup.
 #
-# Every secret comes from .env (git-ignored; template: .env.example).
+# Every secret comes from .env (git-ignored; template: .env.example), passed to each
+# service explicitly through `environment:` (no env_file).
 # Honest scale note: Airflow is not needed at this data size (17 HTTP calls/hour);
 # it is here to demonstrate the architecture.
 
@@ -32,55 +33,72 @@ x-alacati-mounts:
     target: /opt/alacati/contracts
     read_only: true
   - &mount-adc
-    # gcloud Application Default Credentials (`gcloud auth application-default login`),
-    # mounted read-only. Production alternative: a dedicated service account.
+    # gcloud Application Default Credentials (`gcloud auth application-default login`).
+    # The whole gcloud FOLDER is mounted read-only, not the single file: a re-login
+    # replaces application_default_credentials.json (new inode), and a single-file bind
+    # mount would keep pointing at the old, revoked file. Production alternative: a
+    # dedicated service account / workload identity.
     type: bind
-    source: ${GCP_ADC_FILE:?set GCP_ADC_FILE in .env (path to application_default_credentials.json)}
-    target: /opt/gcp/adc.json
+    source: ${GCP_ADC_DIR:?set GCP_ADC_DIR in .env (host gcloud config folder)}
+    target: /opt/gcp
     read_only: true
     bind:
       create_host_path: false
+
+# BigQuery settings for everything that talks to BigQuery (scheduler tasks, bot).
+x-bigquery-env: &bigquery-env
+  GCP_PROJECT_ID: ${GCP_PROJECT_ID:?set GCP_PROJECT_ID in .env}
+  # Lets the Google client libraries find the project (silences "No project ID could be
+  # determined" warnings with user ADC).
+  GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:?set GCP_PROJECT_ID in .env}
+  GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/application_default_credentials.json
+  BQ_LOCATION: ${BQ_LOCATION:-EU}
+  BQ_DATASET_RAW: ${BQ_DATASET_RAW:-alacati_raw}
+  BQ_DATASET_OPS: ${BQ_DATASET_OPS:-alacati_ops}
+  BQ_DATASET_STAGING: ${BQ_DATASET_STAGING:-alacati_staging}
+  BQ_DATASET_MARTS: ${BQ_DATASET_MARTS:-alacati_marts}
+
+x-telegram-env: &telegram-env
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+  TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+
+# No `env_file: .env` anywhere: each service gets only the variables it needs.
+# Airflow's own settings, identical in every Airflow container:
+x-airflow-env: &airflow-env
+  # --- core ---
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: &airflow-db-conn postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:?set AIRFLOW_POSTGRES_USER in .env}:${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/${AIRFLOW_POSTGRES_DB:?set AIRFLOW_POSTGRES_DB in .env}
+  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env}
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  # Unpaused on first start, so the system works without a manual click after setup.
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+  # Small laptop: at most 4 task processes at once.
+  AIRFLOW__CORE__PARALLELISM: "4"
+  AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
+  # Must be identical in every Airflow container (task tokens, log fetching).
+  AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?set AIRFLOW_JWT_SECRET in .env}
+  AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?set AIRFLOW_API_SECRET_KEY in .env}
+  AIRFLOW__API__WORKERS: "1"
+  AIRFLOW__API__EXPOSE_CONFIG: "false"
+  AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  _PIP_ADDITIONAL_REQUIREMENTS: ""
 
 x-airflow-common: &airflow-common
   build:
     context: .
     dockerfile: docker/airflow/Dockerfile
   image: alacati-hava/airflow:3.3.2
-  env_file:
-    - .env
-  environment: &airflow-common-env
-    # --- core ---
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:?set AIRFLOW_POSTGRES_USER in .env}:${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/${AIRFLOW_POSTGRES_DB:?set AIRFLOW_POSTGRES_DB in .env}
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env}
-    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    # Unpaused on first start, so the system works without a manual click after setup.
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
-    AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-    # Small laptop: at most 4 task processes at once.
-    AIRFLOW__CORE__PARALLELISM: "4"
-    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
-    # Must be identical in every Airflow container (task tokens, log fetching).
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?set AIRFLOW_JWT_SECRET in .env}
-    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?set AIRFLOW_API_SECRET_KEY in .env}
-    AIRFLOW__API__WORKERS: "1"
-    AIRFLOW__API__EXPOSE_CONFIG: "false"
-    AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
-    _PIP_ADDITIONAL_REQUIREMENTS: ""
-    # --- components (ingestion / dbt / bot venvs) ---
-    # Overrides the host path that .env may carry for local (non-Docker) runs.
-    GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/adc.json
-    ALACATI_CONFIG_DIR: /opt/alacati/config
-    DBT_PROFILES_DIR: /opt/alacati/dbt-profiles
+  environment:
+    <<: *airflow-env
   volumes:
     - ./orchestration/dags:/opt/airflow/dags:ro
     - airflow-logs:/opt/airflow/logs
     - *mount-config
     - *mount-contracts
-    - *mount-adc
   user: "50000:0"
   logging: *default-logging
 
@@ -107,6 +125,12 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    # Airflow settings + the admin login it creates. No GCP / Telegram access needed.
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:?set AIRFLOW_ADMIN_USER in .env}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD in .env}
+      AIRFLOW_POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}
     entrypoint: /bin/bash
     # Checks .env secrets, fixes log-volume ownership, runs `airflow db migrate` and
     # creates the admin user (AIRFLOW_ADMIN_USER / AIRFLOW_ADMIN_PASSWORD from .env).
@@ -140,7 +164,20 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     # LocalExecutor: tasks (ingest, dbt, summary) run as child processes of this
-    # container, so it gets the largest memory budget.
+    # container, so it gets the largest memory budget and the component settings.
+    environment:
+      <<: [*airflow-env, *bigquery-env, *telegram-env]
+      ALACATI_CONFIG_DIR: /opt/alacati/config
+      DBT_PROFILES_DIR: /opt/alacati/dbt-profiles
+      # airflow_maintenance `db clean` only (Airflow 3 blocks the normal variable inside
+      # tasks; alacati_runtime strips this one from ingest/dbt/bot subprocesses).
+      ALACATI_MAINTENANCE_DB_CONN: *airflow-db-conn
+    volumes:
+      - ./orchestration/dags:/opt/airflow/dags:ro
+      - airflow-logs:/opt/airflow/logs
+      - *mount-config
+      - *mount-contracts
+      - *mount-adc
     command: scheduler
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8974/health"]
@@ -161,6 +198,12 @@ services:
 
   airflow-dag-processor:
     <<: *airflow-common
+    # Parsing the DAG files reads no GCP / BigQuery setting. Airflow 3 runs DAG-level
+    # callbacks here, so the failure notification (alacati_runtime.notify_failure)
+    # needs the Telegram variables in this container.
+    environment:
+      <<: [*airflow-env, *telegram-env]
+      ALACATI_CONFIG_DIR: /opt/alacati/config
     command: dag-processor
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
@@ -183,13 +226,7 @@ services:
     image: alacati-hava/telegram-bot:latest
     # Only what the bot needs — not the whole .env (keeps Airflow/Postgres secrets out).
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?set GCP_PROJECT_ID in .env}
-      BQ_LOCATION: ${BQ_LOCATION:-EU}
-      BQ_DATASET_MARTS: ${BQ_DATASET_MARTS:-alacati_marts}
-      BQ_DATASET_OPS: ${BQ_DATASET_OPS:-alacati_ops}
-      GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/adc.json
+      <<: [*bigquery-env, *telegram-env]
       ALACATI_CONFIG_DIR: /opt/alacati/config
     volumes:
       - *mount-config

@@ -32,10 +32,7 @@ if [[ "${AIRFLOW_POSTGRES_PASSWORD:-}" == change-me* ]]; then
   warn "AIRFLOW_POSTGRES_PASSWORD still has its placeholder (Postgres is not exposed, but change it)"
 fi
 
-# --- GCP credentials (warn only: Airflow itself starts without them) ------------------
-if [[ ! -r "${GOOGLE_APPLICATION_CREDENTIALS:-/opt/gcp/adc.json}" || -d "${GOOGLE_APPLICATION_CREDENTIALS:-/opt/gcp/adc.json}" ]]; then
-  warn "GCP credentials not readable at ${GOOGLE_APPLICATION_CREDENTIALS:-/opt/gcp/adc.json}; ingest/dbt/summary tasks will fail (check GCP_ADC_FILE in .env)"
-fi
+# --- mounts (GCP credentials are not mounted here: init never talks to BigQuery) --------
 for d in /opt/alacati/config /opt/alacati/contracts; do
   [[ -n "$(ls -A "$d" 2>/dev/null)" ]] || fail "$d is empty: config/ and contracts/ must be mounted"
 done

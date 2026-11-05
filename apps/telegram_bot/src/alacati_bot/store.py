@@ -1,4 +1,4 @@
-"""BigQuery data access: SELECT-only on marts, parameterised, 10-minute TTL cache."""
+"""BigQuery data access: SELECT-only on marts, parameterised, TTL cache."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from typing import Any
 
 from google.cloud import bigquery
 
-from .settings import Env
+from .settings import BotParams, Env
 
-TTL_SECONDS = 600
+TTL_SECONDS = 600.0  # default for TTLCache only; the store uses data.cache_ttl_minutes
 _NOW_HOUR = "TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), HOUR)"
 
 Row = dict[str, Any]
@@ -44,10 +44,11 @@ class TTLCache:
 class BigQueryStore:
     """Mart reader plus summary_log access."""
 
-    def __init__(self, env: Env, client: bigquery.Client | None = None) -> None:
+    def __init__(self, env: Env, params: BotParams, client: bigquery.Client | None = None) -> None:
         self._env = env
+        self._timeout = params.query_timeout_s
         self._client = client or bigquery.Client(project=env.project, location=env.bq_location)
-        self._cache = TTLCache()
+        self._cache = TTLCache(ttl=params.cache_ttl_minutes * 60)
 
     def _marts(self, table: str) -> str:
         return f"`{self._client.project}.{self._env.marts_dataset}.{table}`"
@@ -57,7 +58,9 @@ class BigQueryStore:
 
     def _run(self, sql: str, params: list[Any] | None = None) -> list[Row]:
         cfg = bigquery.QueryJobConfig(query_parameters=params or [])
-        return [dict(r) for r in self._client.query(sql, job_config=cfg).result()]
+        return [
+            dict(r) for r in self._client.query(sql, job_config=cfg).result(timeout=self._timeout)
+        ]
 
     def _cached(self, key: tuple[Any, ...], sql: str, params: list[Any] | None = None) -> list[Row]:
         return list(self._cache.get_or_set(key, lambda: self._run(sql, params)))
@@ -134,6 +137,15 @@ class BigQueryStore:
         )
         rows = self._cached(("run",), sql)
         return str(rows[0]["forecast_run_id"]) if rows else None
+
+    def latest_fetched_at(self) -> datetime | None:
+        sql = (
+            "SELECT MAX(forecast_fetched_at) AS t "
+            f"FROM {self._marts('mart_location_weather_hourly')} "
+            f"WHERE time_utc >= TIMESTAMP_SUB({_NOW_HOUR}, INTERVAL 24 HOUR)"
+        )
+        rows = self._cached(("fetched",), sql)
+        return rows[0]["t"] if rows and rows[0]["t"] is not None else None
 
     # --- ops.summary_log (never cached) ---------------------------------------------
 
