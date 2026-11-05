@@ -124,7 +124,7 @@ cd apps/streamlit && uv run streamlit run app.py            # dashboard on local
 | contracts + config consistency | 30 |
 | ingestion | 48 |
 | streaming (incl. alert lifecycle) | 52 |
-| Telegram bot | 58 |
+| Telegram bot | 79 |
 | Streamlit | 31 |
 | dbt | 52 data tests + 11 unit tests |
 

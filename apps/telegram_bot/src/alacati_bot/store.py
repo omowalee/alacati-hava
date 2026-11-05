@@ -128,6 +128,20 @@ class BigQueryStore:
         ]
         return self._cached(("windows", spot_id, hours), sql, params)
 
+    def rain_hours(self, start_utc: datetime, end_utc: datetime) -> list[Row]:
+        """Hourly rain rows per location with start_utc <= time_utc <= end_utc (inclusive)."""
+        sql = (
+            "SELECT region_id, location_id, time_utc, precipitation, "
+            "precipitation_probability, weather_code "
+            f"FROM {self._marts('mart_location_weather_hourly')} "
+            "WHERE time_utc >= @t0 AND time_utc <= @t1 ORDER BY time_utc, location_id"
+        )
+        params = [
+            bigquery.ScalarQueryParameter("t0", "TIMESTAMP", start_utc),
+            bigquery.ScalarQueryParameter("t1", "TIMESTAMP", end_utc),
+        ]
+        return self._cached(("rain", start_utc, end_utc), sql, params)
+
     def forecast_run_id(self) -> str | None:
         sql = (
             "SELECT forecast_run_id "

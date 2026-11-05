@@ -62,6 +62,9 @@ class FakeStore:
     def surf_windows(self, spot_id: str, hours: int) -> list[Row]:
         return self.windows
 
+    def rain_hours(self, start_utc: datetime, end_utc: datetime) -> list[Row]:
+        return []
+
     def forecast_run_id(self) -> str | None:
         return self.run_id
 

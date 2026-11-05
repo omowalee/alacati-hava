@@ -9,6 +9,17 @@ commands:
   wind_step_hours: 3              # /ruzgar step between rows
   surf_window_hours: 24           # /ruzgar lists surf windows starting within this many hours
 
+rain:                             # /yagis (presentation bins, not alert thresholds)
+  span_hours: 24                  # "yağışlı saatler" look-ahead
+  wet_hour_mm: 0.1                # an hour counts as rainy from this amount (mm)
+  daily_bins:                     # daily total per region (mm), upper bound exclusive
+    - { max_mm: 0.1, label: "Kuru", emoji: "☀️" }
+    - { max_mm: 2,   label: "Hafif", emoji: "🌦️" }
+    - { max_mm: 10,  label: "Orta", emoji: "🌧️" }
+    - { max_mm: 25,  label: "Kuvvetli", emoji: "🌧️" }
+    - { max_mm: null, label: "Çok kuvvetli", emoji: "⛈️" }
+  thunder_weather_codes: [95, 96, 99]
+
 summary:
   top_beaches: 3
   stale_after_local_hour: 12      # a missed 08:00 summary is not sent after this hour

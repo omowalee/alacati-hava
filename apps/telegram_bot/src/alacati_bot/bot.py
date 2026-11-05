@@ -31,6 +31,7 @@ from .messages import (
     with_footer,
     with_notice,
 )
+from .rain import format_rain, rain_window
 from .ratelimit import RateLimiter, Verdict
 
 log = logging.getLogger("alacati_bot")
@@ -68,6 +69,12 @@ def reply_wind(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
     spot, p = cfg.surf_spot_id, cfg.params
     series = store.wind_series(spot, p.wind_span_hours + 1)
     body = format_wind(series, store.surf_windows(spot, p.surf_window_hours), cfg, now)
+    return _finish(body, store, cfg, now)
+
+
+def reply_rain(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
+    start_utc, end_utc = rain_window(now)
+    body = format_rain(store.rain_hours(start_utc, end_utc), cfg, now)
     return _finish(body, store, cfg, now)
 
 
@@ -143,6 +150,7 @@ def build_application(
     app.add_handler(CommandHandler("uyari", _make_handler(reply_alerts, store, cfg, lim)))
     app.add_handler(CommandHandler("plaj", _make_handler(reply_beaches, store, cfg, lim)))
     app.add_handler(CommandHandler("ruzgar", _make_handler(reply_wind, store, cfg, lim)))
+    app.add_handler(CommandHandler(["yagis", "yagmur"], _make_handler(reply_rain, store, cfg, lim)))
     app.add_handler(
         CommandHandler(["sorf", "surf"], _make_handler(reply_surf, store, cfg, lim, True))
     )

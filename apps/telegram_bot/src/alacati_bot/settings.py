@@ -40,6 +40,44 @@ def _load_yaml(directory: Path, name: str) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class RainBin:
+    """One daily-total bin of config/bot.yaml rain.daily_bins (upper bound exclusive)."""
+
+    max_mm: float | None  # None = open-ended last bin
+    label: str
+    emoji: str
+
+
+@dataclass(frozen=True)
+class RainParams:
+    """The rain: section of config/bot.yaml (/yagis)."""
+
+    span_hours: int
+    wet_hour_mm: float
+    daily_bins: tuple[RainBin, ...]
+    thunder_weather_codes: frozenset[int]
+
+    @classmethod
+    def from_yaml(cls, data: dict[str, Any]) -> RainParams:
+        bins = tuple(
+            RainBin(
+                None if b["max_mm"] is None else float(b["max_mm"]),
+                str(b["label"]),
+                str(b["emoji"]),
+            )
+            for b in data["daily_bins"]
+        )
+        if not bins or bins[-1].max_mm is not None:
+            raise ValueError("rain.daily_bins must end with max_mm: null")
+        return cls(
+            span_hours=int(data["span_hours"]),
+            wet_hour_mm=float(data["wet_hour_mm"]),
+            daily_bins=bins,
+            thunder_weather_codes=frozenset(int(c) for c in data["thunder_weather_codes"]),
+        )
+
+
+@dataclass(frozen=True)
 class BotParams:
     """Parameters from config/bot.yaml."""
 
@@ -59,6 +97,7 @@ class BotParams:
     rate_limit_window_s: float
     telegram_max_chars: int
     telegram_timeout_s: float
+    rain: RainParams
 
     @classmethod
     def from_yaml(cls, data: dict[str, Any]) -> BotParams:
@@ -81,6 +120,7 @@ class BotParams:
             rate_limit_window_s=float(lim["rate_limit_window_s"]),
             telegram_max_chars=int(lim["telegram_max_chars"]),
             telegram_timeout_s=float(lim.get("telegram_timeout_s", 30)),
+            rain=RainParams.from_yaml(data["rain"]),
         )
 
 
