@@ -140,6 +140,85 @@ def _location_values(
     return {i: float(best.get(i, 0)) for i, loc in locs.items() if loc["type"] == "surf_spot"}
 
 
+def _arrow_layer(rows: list[dict[str, object]], color: list[int], width_px: int) -> pdk.Layer:
+    return pdk.Layer(
+        "PathLayer",
+        pd.DataFrame(rows),
+        get_path="path",
+        get_color=color,
+        get_width=width_px,
+        width_units="'pixels'",
+        cap_rounded=True,
+        joint_rounded=True,
+        pickable=True,
+    )
+
+
+def _hour_selector(cfg: AppConfig, is_today: bool) -> int:
+    """Daylight-hour slider; one remembered value per day choice (session_state)."""
+    dl = cfg.surf["daylight_local_hours"]
+    start, end = int(dl["start"]), int(dl["end"])
+    key = f"map_hour_{'today' if is_today else 'tomorrow'}"
+    if key not in st.session_state:
+        st.session_state[key] = rg.default_hour(is_today, _now_local().hour, start, end)
+    return int(
+        st.select_slider(
+            "Saat", options=list(range(start, end)), format_func=lambda h: f"{h:02d}:00", key=key
+        )
+    )
+
+
+def _wind_rows(
+    cfg: AppConfig, day: date, hour: int
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """(small arrows, surf-spot arrows, surf-spot labels) for the chosen local hour."""
+    df = data.wind_hourly(day)
+    if df.empty:
+        return [], [], []
+    df = df[pd.to_datetime(df["time_local"]).dt.hour == hour]
+    locs = cfg.locations_by_id
+    small: list[dict[str, object]] = []
+    big: list[dict[str, object]] = []
+    texts: list[dict[str, object]] = []
+    for r in df.itertuples():
+        loc = locs.get(r.location_id)
+        if loc is None or pd.isna(r.wind_direction_10m) or pd.isna(r.wind_speed_10m):
+            continue
+        speed, deg = float(r.wind_speed_10m), float(r.wind_direction_10m)
+        kn = round(fmt.kmh_to_knots(speed))
+        gust_text = (
+            ""
+            if pd.isna(r.wind_gusts_10m)
+            else f" · Hamle {round(fmt.kmh_to_knots(float(r.wind_gusts_10m)))} kn"
+        )
+        body = (
+            f"Rüzgâr: {kn} kn ({speed:.0f} km/sa){gust_text} · "
+            f"Yön: {rg.compass16(deg)} ({deg:.0f}°)"
+        )
+        is_spot = loc["type"] == "surf_spot"
+        length = rg.arrow_length_km(speed) * (1.15 if is_spot else 1.0)
+        for path in rg.arrow_paths(loc["lon"], loc["lat"], deg, length):
+            row = {"path": [list(p) for p in path], "tip_title": loc["name"], "tip_body": body}
+            (big if is_spot else small).append(row)
+        if is_spot:
+            texts.append({"lon": loc["lon"], "lat": loc["lat"], "text": f"{kn} kn"})
+    return small, big, texts
+
+
+def _wedge_rows(cfg: AppConfig) -> list[dict[str, object]]:
+    """Faint wedges of the good wind directions around each surf spot."""
+    rows: list[dict[str, object]] = []
+    locs = cfg.locations_by_id
+    for spot_id, spot in cfg.surf["spots"].items():
+        loc = locs.get(spot_id)
+        if loc is None:
+            continue
+        for rng in spot.get("good_directions", []):
+            poly = rg.sector_polygon(loc["lon"], loc["lat"], rng["from_deg"], rng["to_deg"])
+            rows.append({"polygon": [list(p) for p in poly]})
+    return rows
+
+
 def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     st.header("Harita")
     del hourly  # the map uses daily / hourly marts through data.* helpers
@@ -156,6 +235,9 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     with ctrl2:
         day_choice = st.radio("Gün", ["Bugün", "Yarın"], horizontal=True, key="map_day")
     day = today + timedelta(days=0 if day_choice == "Bugün" else 1)
+    hour: int | None = None
+    if mode == "Sörf":
+        hour = _hour_selector(cfg, day_choice == "Bugün")
 
     labels = cfg.beach_score["labels_tr"]
     locs = cfg.locations_by_id
@@ -176,7 +258,13 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     for reg in regions:
         if mode == "Sörf" and reg["id"] not in members:
             continue  # no surf spot in this region: don't draw it at all
-        coords = [(loc["lon"], loc["lat"]) for loc in locs.values() if loc["region"] == reg["id"]]
+        if mode == "Sörf":
+            # paint only around the surf spots, not every beach in the region
+            coords = [(locs[i]["lon"], locs[i]["lat"]) for i in members[reg["id"]]]
+        else:
+            coords = [
+                (loc["lon"], loc["lat"]) for loc in locs.values() if loc["region"] == reg["id"]
+            ]
         if not coords:
             continue
         rv = region_vals[reg["id"]]
@@ -250,12 +338,52 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
             get_color=[255, 255, 255, 255],
             get_text_anchor="'middle'",
             get_alignment_baseline="'center'",
+            # in surf mode the spot's speed label sits below the dot, so lift the region name
+            get_pixel_offset=[0, -26] if mode == "Sörf" else [0, 0],
             background=True,
             get_background_color=[26, 26, 25, 170],
             background_padding=[4, 2],
             pickable=False,
         ),
     ]
+    if mode == "Sörf" and hour is not None:
+        small, big, texts = _wind_rows(cfg, day, hour)
+        wedges = _wedge_rows(cfg)
+        if wedges:
+            layers.insert(
+                1,
+                pdk.Layer(
+                    "PolygonLayer",
+                    pd.DataFrame(wedges),
+                    get_polygon="polygon",
+                    get_fill_color=[255, 255, 255, 31],
+                    stroked=False,
+                    pickable=False,
+                ),
+            )
+        if small:
+            layers.insert(2, _arrow_layer(small, [240, 239, 236, 217], 2))
+        if big:
+            layers.insert(len(layers) - 1, _arrow_layer(big, [240, 239, 236, 255], 4))
+        if texts:
+            layers.append(
+                pdk.Layer(
+                    "TextLayer",
+                    pd.DataFrame(texts),
+                    get_position="[lon, lat]",
+                    get_text="text",
+                    get_size=13,
+                    character_set=MAP_LABEL_CHARS,
+                    get_color=[255, 255, 255, 255],
+                    get_text_anchor="'middle'",
+                    get_alignment_baseline="'center'",
+                    get_pixel_offset=[0, 24],
+                    background=True,
+                    get_background_color=[26, 26, 25, 170],
+                    background_padding=[4, 2],
+                    pickable=False,
+                )
+            )
     lat0, lon0 = rg.view_bounds([(loc["lon"], loc["lat"]) for loc in locs.values()])
     view = pdk.ViewState(latitude=lat0, longitude=lon0, zoom=MAP_ZOOM)
     st.pydeck_chart(
@@ -268,7 +396,12 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
         width="stretch",
     )
 
-    st.markdown(_legend_html(rg.swatches_for(mode, labels)), unsafe_allow_html=True)
+    legend = _legend_html(rg.swatches_for(mode, labels))
+    if mode == "Sörf":
+        legend = legend.replace(
+            "</div>", '<span style="white-space:nowrap">→ Rüzgâr yönü (seçili saat)</span></div>'
+        )
+    st.markdown(legend, unsafe_allow_html=True)
     notes = {
         "Plaj": "Bölge rengi: bölgedeki plajların günlük ortalama sakinlik skoru "
         "(koyu = daha sakin).",
@@ -276,6 +409,8 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
         "Sörf": "Bölge rengi: bölgedeki sörf/kite noktalarının günün en iyi penceresi.",
     }
     st.caption(f"{notes[mode]} {day_choice}: {day:%d.%m.%Y}.")
+    if mode == "Sörf":
+        st.caption("Açık renkli dilim: o nokta için uygun rüzgâr yönü. Ok: rüzgârın estiği yön.")
 
     shown = [reg for reg in regions if not (mode == "Sörf" and reg["id"] not in members)]
     per_row = 3

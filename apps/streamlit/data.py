@@ -171,3 +171,21 @@ def precip_daily(day: date) -> pd.DataFrame:
             ),
         ],
     )
+
+
+@st.cache_data(ttl=TTL)
+def wind_hourly(day: date) -> pd.DataFrame:
+    """Hourly wind per location for one Europe/Istanbul calendar day (map arrows)."""
+    return _run(
+        "SELECT location_id, time_local, wind_speed_10m, wind_gusts_10m, wind_direction_10m "
+        f"FROM {_table('mart_location_weather_hourly')} "
+        "WHERE DATE(time_local) = @d AND time_utc >= TIMESTAMP_SUB(@d_ts, INTERVAL 1 DAY) "
+        "AND time_utc < TIMESTAMP_ADD(@d_ts, INTERVAL 2 DAY) "
+        "ORDER BY location_id, time_local",
+        [
+            bigquery.ScalarQueryParameter("d", "DATE", day),
+            bigquery.ScalarQueryParameter(
+                "d_ts", "TIMESTAMP", datetime(day.year, day.month, day.day, tzinfo=UTC)
+            ),
+        ],
+    )

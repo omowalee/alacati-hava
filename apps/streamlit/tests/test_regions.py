@@ -100,3 +100,65 @@ def test_hex_to_rgba():
 
 def test_view_bounds_centre():
     assert r.view_bounds([(26.0, 38.0), (27.0, 39.0)]) == (38.5, 26.5)
+
+
+def _bearing_of(a, b):
+    import math
+
+    dx = (b[0] - a[0]) * math.cos(math.radians(a[1]))
+    dy = b[1] - a[1]
+    return math.degrees(math.atan2(dx, dy)) % 360
+
+
+def test_arrow_from_north_points_south():
+    shaft = r.arrow_paths(26.3, 38.3, 0, 2.0)[0]
+    assert abs(_bearing_of(*shaft) - 180) < 0.5
+
+
+def test_arrow_from_east_points_west():
+    shaft = r.arrow_paths(26.3, 38.3, 90, 2.0)[0]
+    assert abs(_bearing_of(*shaft) - 270) < 0.5
+
+
+def test_arrow_has_shaft_and_two_head_strokes_ending_at_tip():
+    paths = r.arrow_paths(26.3, 38.3, 45, 2.0)
+    assert len(paths) == 3
+    assert paths[1][1] == paths[0][1] == paths[2][1]
+
+
+def test_arrow_length_clamped_and_monotonic():
+    assert r.arrow_length_km(0) == r.ARROW_MIN_KM
+    assert r.arrow_length_km(500) == r.ARROW_MAX_KM
+    assert r.arrow_length_km(10) < r.arrow_length_km(30)
+    assert r.arrow_length_km(None) == r.ARROW_MIN_KM
+
+
+def test_sector_wraps_through_north():
+    poly = r.sector_polygon(26.3, 38.3, 315, 45)
+    assert poly[0] == (26.3, 38.3)
+    bearings = [_bearing_of(poly[0], p) for p in poly[1:]]
+    assert abs(bearings[0] - 315) < 0.5
+    assert abs(bearings[-1] - 45) < 0.5
+    assert any(b < 1 or b > 359 for b in bearings) or any(abs(b) < 3 for b in bearings)
+    assert all(p[1] > 38.3 - 1e-9 or abs(p[1] - 38.3) < 1e-6 for p in poly)  # northern half
+
+
+def test_sector_south_is_south_of_spot():
+    poly = r.sector_polygon(26.3, 38.3, 160, 225)
+    assert all(p[1] <= 38.3 for p in poly)
+
+
+def test_compass16():
+    assert r.compass16(0) == "K"
+    assert r.compass16(45) == "KD"
+    assert r.compass16(22.5) == "KKD"
+    assert r.compass16(359) == "K"
+    assert r.compass16(None) == "–"
+
+
+def test_default_hour():
+    assert r.default_hour(True, 14, 8, 20) == 14
+    assert r.default_hour(True, 3, 8, 20) == 8
+    assert r.default_hour(True, 22, 8, 20) == 19
+    assert r.default_hour(False, 9, 8, 20) == 14
+    assert r.default_hour(False, 9, 8, 12) == 11

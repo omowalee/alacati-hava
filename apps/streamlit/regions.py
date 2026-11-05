@@ -250,3 +250,88 @@ def aggregate_regions(
         v, text, label, color = value_style(mode, agg, labels)
         out.append(RegionValue(reg["id"], reg["name"], v, text, label, color))
     return out
+
+
+# --- Wind arrows (surf map) -------------------------------------------------------------
+
+_COMPASS16_TR = (
+    "K", "KKD", "KD", "DKD", "D", "DGD", "GD", "GGD",
+    "G", "GGB", "GB", "BGB", "B", "BKB", "KB", "KKB",
+)  # fmt: skip
+ARROW_MIN_KM = 0.8
+ARROW_MAX_KM = 2.5
+ARROW_FULL_SPEED_KMH = 50.0  # speed at which the arrow reaches its maximum length
+WEDGE_RADIUS_KM = 2.5
+WEDGE_ARC_STEP_DEG = 5.0
+_KM_PER_DEG_LAT = 110.574
+_KM_PER_DEG_LON = 111.320
+
+
+def compass16(deg: float | None) -> str:
+    """16-point Turkish compass name (K, KKD, KD, ...); '–' when missing."""
+    if _missing(deg):
+        return "–"
+    assert deg is not None
+    return _COMPASS16_TR[int(((deg % 360) + 11.25) // 22.5) % 16]
+
+
+def destination(lon: float, lat: float, bearing_deg: float, km: float) -> tuple[float, float]:
+    """(lon, lat) ``km`` away along a compass bearing (flat-earth, fine at this scale)."""
+    b = math.radians(bearing_deg)
+    dlat = km * math.cos(b) / _KM_PER_DEG_LAT
+    dlon = km * math.sin(b) / (_KM_PER_DEG_LON * math.cos(math.radians(lat)))
+    return lon + dlon, lat + dlat
+
+
+def arrow_length_km(speed_kmh: float | None) -> float:
+    """Arrow length growing gently with wind speed, clamped to [ARROW_MIN_KM, ARROW_MAX_KM]."""
+    if _missing(speed_kmh):
+        return ARROW_MIN_KM
+    assert speed_kmh is not None
+    frac = max(0.0, min(1.0, speed_kmh / ARROW_FULL_SPEED_KMH))
+    return ARROW_MIN_KM + (ARROW_MAX_KM - ARROW_MIN_KM) * frac
+
+
+def arrow_paths(
+    lon: float, lat: float, wind_from_deg: float, length_km: float
+) -> list[list[tuple[float, float]]]:
+    """Shaft plus two head strokes of an arrow pointing DOWNWIND, tail at (lon, lat).
+
+    ``wind_from_deg`` is the meteorological direction (where the wind comes FROM), so the
+    arrow bearing is ``wind_from_deg + 180``: wind from 0 (N) points south, from 90 (E) west.
+    """
+    bearing = (wind_from_deg + 180.0) % 360.0
+    tip = destination(lon, lat, bearing, length_km)
+    head_km = length_km * 0.35
+    left = destination(tip[0], tip[1], bearing + 150.0, head_km)
+    right = destination(tip[0], tip[1], bearing - 150.0, head_km)
+    return [[(lon, lat), tip], [left, tip], [right, tip]]
+
+
+def sector_polygon(
+    lon: float,
+    lat: float,
+    from_deg: float,
+    to_deg: float,
+    radius_km: float = WEDGE_RADIUS_KM,
+    step_deg: float = WEDGE_ARC_STEP_DEG,
+) -> list[tuple[float, float]]:
+    """Wedge centred on (lon, lat) covering compass bearings from_deg..to_deg clockwise.
+
+    The range is inclusive and may wrap through 0 (e.g. 315 -> 45).
+    """
+    span = (to_deg - from_deg) % 360.0
+    steps = max(1, math.ceil(span / step_deg))
+    pts = [(lon, lat)]
+    for i in range(steps + 1):
+        pts.append(destination(lon, lat, from_deg + span * i / steps, radius_km))
+    return pts
+
+
+def default_hour(is_today: bool, now_hour: int, start: int, end: int) -> int:
+    """Default hour of the surf map slider; ``end`` is exclusive.
+
+    Today: the current hour clamped into the daylight range (last hour once daylight is
+    over). Tomorrow: 14:00 clamped into the range.
+    """
+    return max(start, min(end - 1, now_hour if is_today else 14))
