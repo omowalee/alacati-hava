@@ -16,9 +16,12 @@ Delivered through a **Telegram bot** (08:00 morning summary, instant alerts, `/u
 > warnings see the Turkish State Meteorological Service ([MGM](https://mgm.gov.tr)).
 > Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
 
-**Dashboard:** runs locally (`cd apps/streamlit && uv run streamlit run app.py`); it reads
-only the small mart tables, so it can also be hosted on Streamlit Community Cloud with a
-read-only service account (see `apps/streamlit/.streamlit/secrets.toml.example`).
+**Live dashboard:** <https://alacati-hava.streamlit.app> (Streamlit Community Cloud, read-only
+service account limited to the mart tables) · **Telegram channel:** <https://t.me/alacatihava>
+· **Bot:** <https://t.me/alacati_hava_bot>
+
+The dashboard keeps working when the laptop "server" is off; it then shows the last data
+that was loaded (the page shows the time of the last update).
 
 ---
 
