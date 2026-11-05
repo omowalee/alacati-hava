@@ -38,6 +38,10 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "S", "SIM"]
 ignore = ["S101"]
 
+[tool.ruff.lint.per-file-ignores]
+# Table names in these queries come from the contract and settings, never from user input.
+"src/alacati_ingestion/bq_loader.py" = ["S608"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

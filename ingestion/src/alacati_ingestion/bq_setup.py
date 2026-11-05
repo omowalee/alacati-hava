@@ -26,7 +26,7 @@ def _schema_field(col: dict[str, Any]) -> bigquery.SchemaField:
         name=col["name"],
         field_type=col["type"],
         mode=col["mode"],
-        description=col.get("description"),
+        description=col.get("description") or "",
         fields=[_schema_field(c) for c in col.get("fields", [])],
     )
 
