@@ -8,7 +8,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from confluent_kafka import KafkaException
+from telegram.error import BadRequest, Forbidden, InvalidToken, NetworkError, RetryAfter, TimedOut
 
+from alacati_bot import listener as listener_mod
 from alacati_bot import settings
 from alacati_bot.alerts import AlertError, format_alert, parse_alert
 from alacati_bot.listener import AlertListener, KafkaMessage
@@ -136,6 +139,7 @@ class FakeConsumer:
     def __init__(self, msgs: list[FakeMsg], events: list[str], stop: threading.Event) -> None:
         self.msgs, self.events, self.stop = msgs, events, stop
         self.closed = False
+        self.commit_error: Exception | None = None
 
     def poll(self, timeout: float) -> KafkaMessage | None:
         if not self.msgs:
@@ -145,6 +149,8 @@ class FakeConsumer:
 
     def commit(self, *, message: KafkaMessage, asynchronous: bool) -> None:
         assert asynchronous is False
+        if self.commit_error:
+            raise self.commit_error
         self.events.append("commit")
 
     def close(self) -> None:
@@ -172,14 +178,17 @@ class FakeStore:
 
 
 class FakeSender:
-    def __init__(self, events: list[str], failures: int = 0) -> None:
+    def __init__(
+        self, events: list[str], failures: int = 0, error: Exception | None = None
+    ) -> None:
         self.events, self.failures = events, failures
+        self.error: Exception = error or TimedOut("telegram down")
         self.sent: list[tuple[str, str]] = []
 
     def send(self, chat_id: str, text: str) -> int | None:
         if self.failures > 0:
             self.failures -= 1
-            raise RuntimeError("telegram down")
+            raise self.error
         self.events.append("send")
         self.sent.append((chat_id, text))
         return 42
@@ -187,14 +196,18 @@ class FakeSender:
 
 class Rig:
     def __init__(
-        self, msgs: list[bytes], sender_failures: int = 0, record_failures: int = 0
+        self,
+        msgs: list[bytes],
+        sender_failures: int = 0,
+        record_failures: int = 0,
+        error: Exception | None = None,
     ) -> None:
         self.events: list[str] = []
         self.waits: list[float] = []
         stop = threading.Event()
         self.consumer = FakeConsumer([FakeMsg(m) for m in msgs], self.events, stop)
         self.store = FakeStore(self.events, record_failures)
-        self.sender = FakeSender(self.events, sender_failures)
+        self.sender = FakeSender(self.events, sender_failures, error)
         self.listener = AlertListener(
             self.consumer,
             self.store,
@@ -264,6 +277,70 @@ def test_record_failure_still_commits(caplog: pytest.LogCaptureFixture) -> None:
     assert rig.store.record_calls == CFG.params.record_retries + 1
     assert rig.events == ["send", "commit"]
     assert any(r.levelname == "CRITICAL" for r in caplog.records)
+
+
+def test_backoff_is_capped_at_60s() -> None:
+    rig = Rig([payload(alert())], sender_failures=6)
+    rig.listener.run()
+    assert rig.waits == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
+
+
+def test_commit_kafka_exception_is_swallowed(caplog: pytest.LogCaptureFixture) -> None:
+    rig = Rig([payload(alert()), payload(alert())])
+    rig.consumer.commit_error = KafkaException("evicted")
+    rig.listener.run()  # must not raise; the second message is a dedupe skip
+    assert len(rig.sender.sent) == 1
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "error", [BadRequest("chat not found"), Forbidden("blocked"), InvalidToken("bad")]
+)
+def test_permanent_telegram_error_is_terminal_and_committed(
+    error: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    rig = Rig([payload(alert())], sender_failures=99, error=error)
+    rig.listener.run()
+    assert rig.waits == [] and rig.events == ["commit"]
+    assert any(r.levelname == "CRITICAL" for r in caplog.records)
+
+
+def test_retry_after_is_honoured() -> None:
+    rig = Rig([payload(alert())], sender_failures=1, error=RetryAfter(17))
+    rig.listener.run()
+    assert rig.waits == [17.0]
+    assert rig.events == ["send", "record", "commit"]
+
+
+def test_network_error_is_retried() -> None:
+    rig = Rig([payload(alert())], sender_failures=1, error=NetworkError("dns"))
+    rig.listener.run()
+    assert rig.waits == [5.0] and rig.events == ["send", "record", "commit"]
+
+
+def test_shutdown_during_record_retries_logs_info_not_critical(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO")
+    rig = Rig([payload(alert())], record_failures=-1)
+    rig.listener._wait = lambda _s: True
+    rig.listener.run()
+    assert not any(r.levelname == "CRITICAL" for r in caplog.records)
+    assert any("shutdown interrupted recording" in r.getMessage() for r in caplog.records)
+
+
+def test_consumer_sets_max_poll_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class C:
+        def __init__(self, conf: dict[str, Any]) -> None:
+            captured.update(conf)
+
+        def subscribe(self, topics: list[str]) -> None: ...
+
+    monkeypatch.setattr("confluent_kafka.Consumer", C)
+    listener_mod.build_consumer("x:1")
+    assert captured["max.poll.interval.ms"] == 900_000
 
 
 def test_broadcast_chat_fallback() -> None:

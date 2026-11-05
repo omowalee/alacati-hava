@@ -118,8 +118,8 @@ cd apps/streamlit && uv run streamlit run app.py            # dashboard on local
 |---|---|
 | contracts + config consistency | 30 |
 | ingestion | 48 |
-| streaming (incl. alert lifecycle) | 50 |
-| Telegram bot | 40 |
+| streaming (incl. alert lifecycle) | 52 |
+| Telegram bot | 49 |
 | Streamlit | 9 |
 | dbt | 52 data tests + 11 unit tests |
 
@@ -134,6 +134,11 @@ by a separate code-review pass before it was approved.
   four open-sea cells (~9 km grid), so sheltered bays usually see less than reported.
 - **Unverified locations.** Beach coordinates and shore orientations are drafts marked
   `verified: false` until checked locally.
+- **At-least-once delivery.** Ids are deterministic and deliveries are de-duplicated, but
+  a crash at an unlucky moment can still produce a rare duplicate Telegram message.
+- **Stale alerts are dropped.** The bot ignores alert notifications older than two hours,
+  so if the bot itself is down longer than that, those messages are skipped (the current
+  state is still visible via `/uyari` and the dashboard).
 - **Laptop server.** Single broker, replication factor 1, local gcloud credentials —
   fine for a portfolio, not for production (use a service account and managed services).
 

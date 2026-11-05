@@ -50,6 +50,7 @@ episode:
   notify_window_shift_hours: 3
   end_after_absent_runs: 2             # hysteresis against flapping ended -> new
   downgrade_confirm_runs: 2            # level must stay lower for 2 runs before "updated"
+                                       # (supported values: 1 or 2 — alert_state has no counter column)
 
 delivery:
   max_notification_age_minutes: 120    # the bot drops older notifications (e.g. a new

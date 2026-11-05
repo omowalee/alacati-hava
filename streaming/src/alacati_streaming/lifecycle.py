@@ -17,11 +17,20 @@ Decisions worth knowing:
 - Downgrades need downgrade_confirm_runs consecutive lower runs. alert_state keeps the
   level of the last run (`level`) next to `notified_level`; that gives one run of
   history, so values 1 and 2 are supported (a larger value would need a counter column,
-  i.e. a contract change).
+  i.e. a contract change). A run in which the event is absent breaks "consecutive": the
+  stored `level` is reset to `notified_level` so the pending-downgrade count restarts.
 - absent_runs is derived, not incremented: the number of complete runs after
   last_seen_run_id. Re-evaluating the same run gives the same count.
 - A state row whose last_seen_run_id is the evaluated run was already processed (crash
   after the state MERGE, before the offset commit): it is left alone.
+- The "ended" notification carries the last NOTIFIED level (notified_level), never an
+  unconfirmed lower `level`.
+
+Known rare window: if the process crashes after publishing a "new" notification but
+before the alert_state MERGE, and the replay then runs against a NEWER dbt run whose
+episode no longer yields the same episode_key, a second "new" (different event_id)
+can be published for the same real-world event. A replay against the same run is
+exactly idempotent.
 """
 
 from __future__ import annotations
@@ -203,7 +212,11 @@ def _window_shifted(state: AlertState, ep: Episode, now: datetime, cfg: Lifecycl
 def _match(
     episodes: Sequence[Episode], states: Sequence[AlertState], cfg: LifecycleConfig
 ) -> dict[str, Episode]:
-    """event_id -> episode. Each episode continues at most one event and vice versa."""
+    """event_id -> episode. Each episode continues at most one event and vice versa.
+
+    By design, an episode whose best event is claimed by a better-overlapping episode
+    is left unmatched and therefore becomes a new event.
+    """
     tolerance = timedelta(hours=cfg.match_tolerance_hours)
     # candidates: (episode, state, overlap)
     best_for_episode: dict[str, tuple[AlertState, timedelta]] = {}
@@ -475,9 +488,11 @@ def _absent_or_ended(
     elif absent >= cfg.end_after_absent_runs:
         reason = "forecast_cleared"
     if reason is None:
-        if absent == st.absent_runs:
+        # An absent run breaks "consecutive" lower runs: restart the downgrade count.
+        level = st.level if ep is not None else st.notified_level
+        if absent == st.absent_runs and level == st.level:
             return st, None
-        return replace(st, absent_runs=absent, last_updated_at=now), None
+        return replace(st, absent_runs=absent, level=level, last_updated_at=now), None
 
     revision = st.revision + 1
     note = _notify(
@@ -487,7 +502,7 @@ def _absent_or_ended(
         status="ended",
         reasons=[reason],
         hazard=st.hazard,
-        level=st.level,
+        level=st.notified_level,
         start_utc=st.start_utc,
         end_utc=st.end_utc,
         peak_value=st.peak_value,
@@ -504,7 +519,7 @@ def _absent_or_ended(
         status="ended",
         absent_runs=absent,
         revision=revision,
-        notified_level=st.level,
+        notified_level=st.notified_level,
         notified_start_utc=st.start_utc,
         notified_end_utc=st.end_utc,
         notified_regions=st.affected_regions,

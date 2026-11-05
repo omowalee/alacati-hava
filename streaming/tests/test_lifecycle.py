@@ -161,6 +161,36 @@ def test_level_down_needs_two_consecutive_runs() -> None:
     assert (note.level, note.previous_level) == ("orange", "red")
 
 
+def test_absent_run_resets_pending_downgrade() -> None:
+    st = first_event(T0 + 5 * H, T0 + 10 * H, level="red")
+    lower = ep(T0 + 5 * H, T0 + 10 * H, level="orange", run="r2")
+    d2 = run_decide([lower], [st], "r2", ["r1", "r2"], T0 + H)
+    states = merged([st], d2)
+    d3 = run_decide([], states, "r3", ["r1", "r2", "r3"], T0 + 2 * H)  # absent
+    assert d3.notifications == []
+    states = merged(states, d3)
+    lower4 = replace(lower, forecast_run_id="r4")
+    d4 = run_decide([lower4], states, "r4", ["r1", "r2", "r3", "r4"], T0 + 3 * H)
+    assert d4.notifications == []  # downgrade count restarted: not confirmed yet
+
+
+def test_ended_carries_last_notified_level_not_unconfirmed_lower() -> None:
+    cfg = replace(CFG, end_after_absent_runs=3)
+    st = first_event(T0 + 5 * H, T0 + 10 * H, level="red")
+    lower = ep(T0 + 5 * H, T0 + 10 * H, level="orange", run="r2")
+    states = merged([st], run_decide([lower], [st], "r2", ["r1", "r2"], T0 + H, cfg))
+    assert states[0].level == "orange"
+    runs = ["r1", "r2", "r3", "r4", "r5"]
+    for i in (3, 4):
+        d = run_decide([], states, f"r{i}", runs[:i], T0 + i * H, cfg)
+        assert d.notifications == []
+        states = merged(states, d)
+    d5 = run_decide([], states, "r5", runs, T0 + 5 * H, cfg)
+    (note,) = d5.notifications
+    assert note.status == "ended" and note.level == "red" and note.previous_level == "red"
+    assert d5.states[0].notified_level == "red"
+
+
 def test_level_down_then_back_up_is_silent() -> None:
     st = first_event(T0 + 5 * H, T0 + 10 * H, level="red")
     d2 = run_decide(

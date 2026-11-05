@@ -3,6 +3,8 @@
 At-least-once with idempotent delivery: the offset is committed only after the message was
 handled (sent + recorded, dropped as stale/invalid, or already delivered). A Telegram or
 BigQuery failure leaves the offset uncommitted and the message is retried with backoff.
+Permanent Telegram errors (bad request, forbidden, invalid token) are terminal: logged at
+CRITICAL and the offset is committed, so the single partition is never blocked.
 """
 
 from __future__ import annotations
@@ -12,8 +14,11 @@ import signal
 import sys
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
+
+from confluent_kafka import KafkaException
+from telegram.error import BadRequest, ChatMigrated, Forbidden, InvalidToken, RetryAfter
 
 from . import settings
 from .alerts import AlertError, format_alert, is_stale, parse_alert
@@ -25,7 +30,11 @@ TOPIC = "weather.alerts"
 GROUP_ID = "telegram-bot"
 POLL_TIMEOUT_S = 1.0
 RETRY_BACKOFF_START_S = 5.0
-RETRY_BACKOFF_MAX_S = 300.0
+# Cap well below max.poll.interval.ms so one stuck message cannot get the consumer evicted.
+RETRY_BACKOFF_MAX_S = 60.0
+MAX_POLL_INTERVAL_MS = 900_000
+# Retrying these can never succeed (bad chat/token/payload): drop, log, commit.
+TERMINAL_TELEGRAM_ERRORS = (BadRequest, Forbidden, InvalidToken, ChatMigrated)
 
 
 class KafkaMessage(Protocol):
@@ -87,7 +96,13 @@ class AlertListener:
             except Exception:
                 log.exception("record delivery failed (attempt %d/%d)", attempt, attempts)
                 if attempt < attempts and self._wait(p.record_backoff_s):
-                    break
+                    log.info(
+                        "shutdown interrupted recording of notification %s (message_id=%s); "
+                        "it may be re-sent after restart unless the offset was committed",
+                        notification_id,
+                        mid,
+                    )
+                    return
         log.critical(
             "notification %s SENT (message_id=%s) but NOT recorded in alert_deliveries; "
             "committing the offset anyway to avoid a resend loop",
@@ -121,11 +136,33 @@ class AlertListener:
             try:
                 self._attempt(payload)
                 return True
+            except TERMINAL_TELEGRAM_ERRORS:
+                log.critical(
+                    "permanent Telegram error; dropping notification and committing the offset",
+                    exc_info=True,
+                )
+                return True
+            except RetryAfter as exc:
+                ra = exc.retry_after
+                wait_s = ra.total_seconds() if isinstance(ra, timedelta) else float(ra)
+                log.warning("Telegram flood limit; retrying in %.0fs", wait_s)
+                if self._wait(wait_s):
+                    return False
             except Exception:
+                # TimedOut / NetworkError / BigQuery errors (and anything unexpected: an alert
+                # is never dropped for an unknown reason) are retried with capped backoff.
                 log.exception("delivery failed; retrying in %.0fs (offset not committed)", delay)
                 if self._wait(delay):
                     return False
                 delay = min(delay * 2, RETRY_BACKOFF_MAX_S)
+
+    def _commit(self, msg: KafkaMessage) -> None:
+        try:
+            self._consumer.commit(message=msg, asynchronous=False)
+        except KafkaException:
+            # E.g. the consumer was evicted/rebalanced. The message is redelivered and
+            # skipped via alert_deliveries, so continuing is safe.
+            log.warning("offset commit failed; relying on delivery dedupe", exc_info=True)
 
     # --- main loop ---------------------------------------------------------------------
     def run(self) -> None:
@@ -139,7 +176,7 @@ class AlertListener:
                     continue
                 payload = msg.value()
                 if payload is None or self.handle(payload):
-                    self._consumer.commit(message=msg, asynchronous=False)
+                    self._commit(msg)
         finally:
             self._consumer.close()
             log.info("alert listener stopped")
@@ -154,6 +191,7 @@ def build_consumer(bootstrap: str) -> AlertConsumer:
             "group.id": GROUP_ID,
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
+            "max.poll.interval.ms": MAX_POLL_INTERVAL_MS,
         }
     )
     consumer.subscribe([TOPIC])

@@ -139,8 +139,10 @@ class TelegramSender:
         from telegram.request import HTTPXRequest
 
         async def _go() -> int | None:
-            # Generous timeouts. python-telegram-bot never retries send_message itself, and
-            # neither do we: a timeout may mean Telegram already accepted the message.
+            # Generous timeouts. python-telegram-bot never retries send_message itself; this
+            # sender does not either. A timeout may mean Telegram already accepted the message:
+            # the summary path never resends, but the alert listener may resend after a
+            # timeout (at-least-once; a duplicate alert is possible, a lost one is not).
             request = HTTPXRequest(
                 connect_timeout=self._timeout,
                 read_timeout=self._timeout,
