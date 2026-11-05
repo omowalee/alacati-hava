@@ -16,7 +16,9 @@ Delivered through a **Telegram bot** (08:00 morning summary, instant alerts, `/u
 > warnings see the Turkish State Meteorological Service ([MGM](https://mgm.gov.tr)).
 > Weather data by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
 
-**Live dashboard:** _link added after deployment_
+**Dashboard:** runs locally (`cd apps/streamlit && uv run streamlit run app.py`); it reads
+only the small mart tables, so it can also be hosted on Streamlit Community Cloud with a
+read-only service account (see `apps/streamlit/.streamlit/secrets.toml.example`).
 
 ---
 
