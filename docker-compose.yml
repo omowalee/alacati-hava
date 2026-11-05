@@ -1,0 +1,212 @@
+# alacati-hava, Phase 2: Airflow (LocalExecutor + Postgres) + Telegram bot.
+#
+# Start / update:   docker compose up -d --build
+# Logs:             docker compose logs -f airflow-scheduler telegram-bot
+# Stop:             docker compose stop        (containers stay; `start` resumes)
+# See docs/laptop-server.md for the laptop-as-server setup.
+#
+# Every secret comes from .env (git-ignored; template: .env.example).
+# Honest scale note: Airflow is not needed at this data size (17 HTTP calls/hour);
+# it is here to demonstrate the architecture.
+
+name: alacati-hava
+
+x-logging: &default-logging
+  # Container stdout logs: rotated, so a months-long uptime cannot fill the disk.
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Read-only runtime config shared by Airflow and the bot. Editing a YAML threshold in
+# config/ needs no rebuild: the next task run reads the new file.
+x-alacati-mounts:
+  - &mount-config
+    type: bind
+    source: ./config
+    target: /opt/alacati/config
+    read_only: true
+  - &mount-contracts
+    type: bind
+    source: ./contracts
+    target: /opt/alacati/contracts
+    read_only: true
+  - &mount-adc
+    # gcloud Application Default Credentials (`gcloud auth application-default login`),
+    # mounted read-only. Production alternative: a dedicated service account.
+    type: bind
+    source: ${GCP_ADC_FILE:?set GCP_ADC_FILE in .env (path to application_default_credentials.json)}
+    target: /opt/gcp/adc.json
+    read_only: true
+    bind:
+      create_host_path: false
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  image: alacati-hava/airflow:3.3.2
+  env_file:
+    - .env
+  environment: &airflow-common-env
+    # --- core ---
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:?set AIRFLOW_POSTGRES_USER in .env}:${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/${AIRFLOW_POSTGRES_DB:?set AIRFLOW_POSTGRES_DB in .env}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Unpaused on first start, so the system works without a manual click after setup.
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    # Small laptop: at most 4 task processes at once.
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
+    # Must be identical in every Airflow container (task tokens, log fetching).
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?set AIRFLOW_JWT_SECRET in .env}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?set AIRFLOW_API_SECRET_KEY in .env}
+    AIRFLOW__API__WORKERS: "1"
+    AIRFLOW__API__EXPOSE_CONFIG: "false"
+    AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    _PIP_ADDITIONAL_REQUIREMENTS: ""
+    # --- components (ingestion / dbt / bot venvs) ---
+    # Overrides the host path that .env may carry for local (non-Docker) runs.
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/adc.json
+    ALACATI_CONFIG_DIR: /opt/alacati/config
+    DBT_PROFILES_DIR: /opt/alacati/dbt-profiles
+  volumes:
+    - ./orchestration/dags:/opt/airflow/dags:ro
+    - airflow-logs:/opt/airflow/logs
+    - *mount-config
+    - *mount-contracts
+    - *mount-adc
+  user: "50000:0"
+  logging: *default-logging
+
+services:
+  postgres:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER:?set AIRFLOW_POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:?set AIRFLOW_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB:?set AIRFLOW_POSTGRES_DB in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Not published: only the Airflow containers reach it on the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 512m
+    shm_size: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    # Checks .env secrets, fixes log-volume ownership, runs `airflow db migrate` and
+    # creates the admin user (AIRFLOW_ADMIN_USER / AIRFLOW_ADMIN_PASSWORD from .env).
+    command: ["/opt/alacati/docker/airflow-init.sh"]
+    user: "0:0"
+    mem_limit: 1g
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-api-server:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "127.0.0.1:8080:8080"   # UI on this laptop only
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1g
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    # LocalExecutor: tasks (ingest, dbt, summary) run as child processes of this
+    # container, so it gets the largest memory budget.
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 2g
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      # Tasks report to the Execution API on the api-server.
+      airflow-api-server:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    mem_limit: 768m
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    image: alacati-hava/telegram-bot:latest
+    # Only what the bot needs — not the whole .env (keeps Airflow/Postgres secrets out).
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:?set GCP_PROJECT_ID in .env}
+      BQ_LOCATION: ${BQ_LOCATION:-EU}
+      BQ_DATASET_MARTS: ${BQ_DATASET_MARTS:-alacati_marts}
+      BQ_DATASET_OPS: ${BQ_DATASET_OPS:-alacati_ops}
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/adc.json
+      ALACATI_CONFIG_DIR: /opt/alacati/config
+    volumes:
+      - *mount-config
+      - *mount-contracts
+      - *mount-adc
+    init: true
+    healthcheck:
+      # getMe on the Bot API: token valid + Telegram reachable. No message is sent.
+      test: ["CMD", "python", "/opt/alacati/docker/bot/healthcheck.py"]
+      interval: 5m
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    mem_limit: 384m
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres-data:
+  airflow-logs:

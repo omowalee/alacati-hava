@@ -14,3 +14,22 @@ dbt/target/
 dbt/logs/
 orchestration/logs/
 data/
+
+# --- added for the Phase 2 images (patterns are relative to the repo root) ---
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+dbt/profiles.yml
+dbt/.user.yml
+dbt/dbt_packages/
+ingestion/tests/
+apps/telegram_bot/tests/
+apps/streamlit/
+tests/
+docs/
+.claude/
+.github/
+*.log
