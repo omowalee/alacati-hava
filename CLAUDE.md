@@ -69,6 +69,7 @@ tests/
    data size — they are there to demonstrate the architecture.
 9. Every alert message and the dashboard carry the disclaimer: personal project based on
    model forecasts; for official warnings see MGM (Meteoroloji Genel Müdürlüğü).
+   Exception (Numan, 2026-11-05): `/sorf` shows only the CC BY attribution line, no disclaimer.
 
 ## Agents
 - `data-engineer`, `debugger` → opus; `python-pro`, `sql-pro`, `code-reviewer` → sonnet.

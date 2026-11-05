@@ -18,8 +18,10 @@ from .messages import (
     ERROR_TEXT,
     RATE_LIMIT_TEXT,
     DataStore,
+    attribution_footer,
     format_alerts,
     format_beaches,
+    format_surf,
     format_wind,
     help_text,
     stale_notice,
@@ -62,12 +64,33 @@ def reply_wind(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
     return _finish(body, store, cfg, now)
 
 
+def reply_surf(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
+    p = cfg.params
+    spots = [
+        (
+            sid,
+            name,
+            sport,
+            store.wind_series(sid, p.wind_span_hours + 1),
+            store.surf_windows(sid, p.surf_window_hours),
+        )
+        for sid, name, sport in cfg.surf_spots
+    ]
+    body = format_surf(spots, cfg, now)
+    notice = stale_notice(store, cfg, now)
+    return truncate_message(with_notice(body, notice), cfg, attribution_footer(cfg))
+
+
 def reply_help(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
     return help_text(cfg)
 
 
 def _make_handler(
-    build: Builder, store: DataStore, cfg: settings.BotConfig, limiter: RateLimiter
+    build: Builder,
+    store: DataStore,
+    cfg: settings.BotConfig,
+    limiter: RateLimiter,
+    short_footer: bool = False,
 ) -> Callable[[Update, ContextTypes.DEFAULT_TYPE], Any]:
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None:
@@ -76,8 +99,13 @@ def _make_handler(
         verdict = limiter.check(chat.id if chat else 0)
         if verdict is Verdict.IGNORE:
             return
+        wrap = (
+            (lambda t: t + attribution_footer(cfg))
+            if short_footer
+            else (lambda t: with_footer(t, cfg))
+        )
         if verdict is Verdict.NOTIFY:
-            text = with_footer(RATE_LIMIT_TEXT, cfg)
+            text = wrap(RATE_LIMIT_TEXT)
         else:
             try:
                 # The thread cannot be killed, but every BigQuery call has its own timeout.
@@ -87,7 +115,7 @@ def _make_handler(
                 )
             except Exception:  # includes TimeoutError
                 log.exception("command failed")
-                text = with_footer(ERROR_TEXT, cfg)
+                text = wrap(ERROR_TEXT)
         await update.message.reply_text(
             text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
@@ -109,6 +137,9 @@ def build_application(
     app.add_handler(CommandHandler("uyari", _make_handler(reply_alerts, store, cfg, lim)))
     app.add_handler(CommandHandler("plaj", _make_handler(reply_beaches, store, cfg, lim)))
     app.add_handler(CommandHandler("ruzgar", _make_handler(reply_wind, store, cfg, lim)))
+    app.add_handler(
+        CommandHandler(["sorf", "surf"], _make_handler(reply_surf, store, cfg, lim, True))
+    )
     return app
 
 

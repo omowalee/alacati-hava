@@ -115,7 +115,8 @@ class BigQueryStore:
 
     def surf_windows(self, spot_id: str, hours: int) -> list[Row]:
         sql = (
-            "SELECT spot_id, sport, quality, window_start_utc, window_end_utc, avg_wind_kmh "
+            "SELECT spot_id, sport, quality, window_start_utc, window_end_utc, avg_wind_kmh, "
+            "max_gust_kmh "
             f"FROM {self._marts('mart_surf_windows')} "
             "WHERE spot_id = @spot AND window_end_utc > CURRENT_TIMESTAMP() "
             "AND window_start_utc < TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL @h HOUR) "

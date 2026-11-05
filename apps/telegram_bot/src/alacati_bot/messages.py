@@ -11,7 +11,10 @@ from .formatting import (
     LEVEL_EMOJI,
     QUALITY_TR,
     SPORT_TR,
+    SURF_QUALITY_TR,
+    SURF_SPORT_TR,
     compass,
+    fmt_day_time,
     fmt_number,
     fmt_range,
     kmh_to_knots,
@@ -66,7 +69,7 @@ def with_notice(body: str, notice: str) -> str:
 _TAG = re.compile(r"<(/?)([a-z]+)[^>]*>")
 
 
-def truncate_message(text: str, cfg: BotConfig) -> str:
+def truncate_message(text: str, cfg: BotConfig, tail: str | None = None) -> str:
     """Fit text into telegram_max_chars: cut the body at a line boundary, keep the footer.
 
     Tags never span lines in our messages, so a line-boundary cut cannot split a tag; any
@@ -75,7 +78,7 @@ def truncate_message(text: str, cfg: BotConfig) -> str:
     limit = cfg.params.telegram_max_chars
     if len(text) <= limit:
         return text
-    tail = footer(cfg)
+    tail = tail if tail is not None else footer(cfg)
     if text.endswith(tail):
         body = text[: -len(tail)]
     else:
@@ -105,6 +108,11 @@ def footer(cfg: BotConfig) -> str:
     return f"\n\n<i>{escape(cfg.disclaimer)}</i>\n{escape(cfg.attribution)}"
 
 
+def attribution_footer(cfg: BotConfig) -> str:
+    """Data attribution only (CC BY 4.0 licence requirement); used by /sorf."""
+    return f"\n\n{escape(cfg.attribution)}"
+
+
 def with_footer(body: str, cfg: BotConfig) -> str:
     return body + footer(cfg)
 
@@ -124,6 +132,7 @@ def help_text(cfg: BotConfig) -> str:
         "/uyari – aktif ve yaklaşan uyarılar\n"
         f"/plaj – rüzgârdan en korunaklı {cfg.params.top_beaches} plaj\n"
         "/ruzgar – Alaçatı rüzgâr tahmini\n"
+        "/sorf – sörf / kite için uygun saatler (/surf da çalışır)\n"
         "/yardim – bu mesaj\n\n"
         "Her sabah günlük özet gönderilir."
     )
@@ -246,6 +255,61 @@ def format_wind_section(
 
 def format_wind(series: list[Row], windows: list[Row], cfg: BotConfig, now_local: datetime) -> str:
     return with_footer(format_wind_section(series, windows, cfg, now_local), cfg)
+
+
+def _marker(hour: datetime, windows: list[Row]) -> str:
+    """'✅ sörf' inside an ideal window, '👍 sörf' inside a rideable one, else '—'."""
+    found = ""
+    for w in windows:
+        if to_local(w["window_start_utc"]) <= hour < to_local(w["window_end_utc"]):
+            if w["quality"] == "ideal":
+                return "✅ sörf"
+            if w["quality"] == "rideable":
+                found = "👍 sörf"
+    return found or "—"
+
+
+def _surf_hour_line(r: Row, windows: list[Row], today: date) -> str:
+    t = r["time_local"]
+    when = f"{t:%H:%M}" if t.date() == today else fmt_day_time(t, today)
+    direction = r.get("wind_direction_10m")
+    speed = float(r["wind_speed_10m"])
+    line = f"{when} {wind_arrow(direction)} {compass(direction)} · {kmh_to_knots(speed):.0f} kn"
+    gust = r.get("wind_gusts_10m")
+    if gust is not None:
+        line += f", hamle {kmh_to_knots(float(gust)):.0f} kn"
+    return f"{line} · {_marker(t, windows)}"
+
+
+def _surf_window_line(w: Row, today: date) -> str:
+    rng = fmt_range(to_local(w["window_start_utc"]), to_local(w["window_end_utc"]), today)
+    quality = SURF_QUALITY_TR.get(str(w["quality"]), str(w["quality"]))
+    avg = float(w["avg_wind_kmh"])
+    line = f"• {rng} · {quality} · ort. {avg:.0f} km/sa ({kmh_to_knots(avg):.0f} kn)"
+    gust = w.get("max_gust_kmh")
+    if gust is not None:
+        line += f", maks. hamle {kmh_to_knots(float(gust)):.0f} kn"
+    return line
+
+
+def format_surf(
+    spots: list[tuple[str, str, str, list[Row], list[Row]]], cfg: BotConfig, now_local: datetime
+) -> str:
+    """/sorf body. spots: (id, name, sport, hourly series, windows); attribution-only footer."""
+    today = now_local.date()
+    blocks = ["<b>🏄 Sörf / Kite — önümüzdeki saatler</b>"]
+    for _, name, sport, series, windows in spots:
+        sport_tr = SURF_SPORT_TR.get(sport, sport)
+        lines = [f"<b>{escape(name)}</b> · {escape(sport_tr)}", "<b>Sörf için uygun saatler:</b>"]
+        if windows:
+            lines += [_surf_window_line(w, today) for w in windows]
+        else:
+            lines.append("Önümüzdeki saatlerde sörf için uygun pencere yok.")
+        steps = pick_wind_steps(series, cfg)
+        lines.append("")
+        lines += [_surf_hour_line(r, windows, today) for r in steps] or ["Rüzgâr verisi yok."]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + attribution_footer(cfg)
 
 
 def format_summary(

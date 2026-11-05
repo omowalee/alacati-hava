@@ -125,6 +125,16 @@ class BotConfig:
                 return str(loc["id"])
         raise ValueError("no surf_spot in locations.yaml")
 
+    @property
+    def surf_spots(self) -> list[tuple[str, str, str]]:
+        """(id, name, sport) of every surf_spot location, in locations.yaml order."""
+        spots = self.surf.get("spots", {})
+        return [
+            (str(loc["id"]), str(loc["name"]), str(spots.get(loc["id"], {}).get("sport", "")))
+            for loc in self.locations["locations"]
+            if loc.get("type") == "surf_spot"
+        ]
+
 
 def load_config(directory: Path | None = None) -> BotConfig:
     """Read alerts, locations, surf and bot YAML files."""

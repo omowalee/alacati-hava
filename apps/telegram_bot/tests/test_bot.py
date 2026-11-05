@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -404,3 +405,82 @@ def test_truncate_real_message() -> None:
     out = bot.reply_alerts(FakeStore(events=events), CFG, NOW)
     assert len(out) <= CFG.params.telegram_max_chars
     _assert_footer(out)
+
+
+def _surf_window(quality: str, start_h: int, end_h: int) -> Row:
+    return {
+        "spot_id": "alacati_surf",
+        "sport": "windsurf",
+        "quality": quality,
+        "window_start_utc": datetime(2026, 11, 5, start_h, 0, tzinfo=UTC),
+        "window_end_utc": datetime(2026, 11, 5, end_h, 0, tzinfo=UTC),
+        "avg_wind_kmh": 35.0,
+        "max_gust_kmh": 50.0,
+    }
+
+
+def _assert_surf_footer(text: str) -> None:
+    assert CFG.attribution in text
+    assert CFG.disclaimer not in text
+    assert "MGM" not in text
+
+
+def test_surf_with_windows_and_markers() -> None:
+    # local = UTC+3: ideal 10:00-13:00 local, rideable 13:00-16:00 local
+    store = FakeStore(
+        wind=_wind(),
+        windows=[_surf_window("ideal", 7, 10), _surf_window("rideable", 10, 13)],
+    )
+    text = bot.reply_surf(store, CFG, NOW)
+    assert "🏄 Sörf / Kite — önümüzdeki saatler" in text
+    assert "Rüzgâr sörfü" in text and "Kite" in text
+    assert "Sörf için uygun saatler:" in text
+    assert "✅ ideal" in text and "👍 sörf yapılabilir" in text
+    assert "maks. hamle 27 kn" in text
+    lines = {ln[:5]: ln for ln in text.splitlines() if ln[:2].isdigit() and " kn" in ln}
+    assert lines["10:00"].endswith("✅ sörf")
+    assert lines["13:00"].endswith("👍 sörf")
+    assert lines["16:00"].endswith("—")
+    _assert_surf_footer(text)
+
+
+def test_surf_without_windows() -> None:
+    text = bot.reply_surf(FakeStore(wind=_wind()), CFG, NOW)
+    assert "Önümüzdeki saatlerde sörf için uygun pencere yok." in text
+    assert "✅ sörf" not in text and "👍 sörf" not in text
+    _assert_surf_footer(text)
+
+
+def test_surf_stale_notice_and_truncation() -> None:
+    old = FakeStore(wind=_wind(), fetched=datetime(2026, 11, 4, 0, 0, tzinfo=UTC))
+    assert bot.reply_surf(old, CFG, NOW).startswith("⚠️ Veriler güncel değil")
+    big = FakeStore(wind=_wind() * 400)
+    cfg = settings.BotConfig(
+        CFG.alerts,
+        CFG.locations,
+        CFG.surf,
+        dataclasses.replace(CFG.params, wind_span_hours=5000, wind_step_hours=1),
+    )
+    out = bot.reply_surf(big, cfg, NOW)
+    assert len(out) <= CFG.params.telegram_max_chars
+    assert out.endswith(CFG.attribution)
+    _assert_surf_footer(out)
+
+
+def test_surf_alias_registered_and_help() -> None:
+    app = bot.build_application("123:abc", FakeStore(), CFG)
+    cmds = {c for h in app.handlers[0] for c in getattr(h, "commands", ())}
+    assert {"sorf", "surf", "ruzgar"} <= cmds
+    assert "/sorf" in help_text(CFG)
+
+
+def test_surf_handler_error_has_no_disclaimer() -> None:
+    class Broken(FakeStore):
+        def wind_series(self, location_id: str, hours: int) -> list[Row]:
+            raise RuntimeError("bq down")
+
+    sent: list[str] = []
+    handler = bot._make_handler(bot.reply_surf, Broken(), CFG, RateLimiter(10, 60), True)
+    asyncio.run(handler(_update(1, sent), cast(Any, None)))
+    assert "veriye ulaşamadım" in sent[0]
+    _assert_surf_footer(sent[0])

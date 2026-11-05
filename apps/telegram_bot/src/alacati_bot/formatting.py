@@ -10,6 +10,8 @@ TZ = ZoneInfo("Europe/Istanbul")
 KMH_PER_KNOT = 1.852
 LEVEL_EMOJI = {"yellow": "🟡", "orange": "🟠", "red": "🔴"}
 SPORT_TR = {"windsurf": "Windsurf", "kitesurf": "Kitesurf"}
+SURF_SPORT_TR = {"windsurf": "Rüzgâr sörfü", "kitesurf": "Kite"}
+SURF_QUALITY_TR = {"ideal": "✅ ideal", "rideable": "👍 sörf yapılabilir"}
 QUALITY_TR = {"ideal": "ideal", "rideable": "yapılabilir"}
 
 _COMPASS_TR = ["K", "KD", "D", "GD", "G", "GB", "B", "KB"]
