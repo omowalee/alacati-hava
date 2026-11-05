@@ -85,4 +85,5 @@ tests/
 
 ## Tooling notes (this machine)
 - No winget. uv and pre-commit installed via `pip install --user`; Python 3.12 via `uv python install 3.12`.
-- Docker Desktop and WSL2 are not installed yet (needed from Phase 2).
+- Docker Desktop (per-user install) + WSL2 are installed; the full stack runs via `docker compose up -d --build`.
+- Do NOT push to GitHub until Numan explicitly says so (remote origin is set).
