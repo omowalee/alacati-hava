@@ -15,6 +15,7 @@ from alacati_bot.messages import (
     RATE_LIMIT_TEXT,
     Row,
     format_summary,
+    header_line,
     help_text,
     no_alerts_text,
     target_beach_day,
@@ -329,7 +330,9 @@ def test_stale_warning_on_every_reply() -> None:
     store = FakeStore(fetched=old, beaches=_beaches(), wind=_wind())
     for fn in (bot.reply_alerts, bot.reply_beaches, bot.reply_wind):
         text = fn(store, CFG, now)
-        assert text.startswith("⚠️ Veriler güncel değil (son güncelleme: 05.11 14:00)")
+        lines = text.splitlines()
+        assert lines[0].startswith("📅 Per 05.11.2026 · 🕒 18:30 · son veri 14:00")
+        assert lines[1].startswith("⚠️ Veriler güncel değil (son güncelleme: 05.11 14:00)")
         _assert_footer(text)
     fresh = bot.reply_alerts(FakeStore(), CFG, NOW)
     assert "Veriler güncel değil" not in fresh
@@ -453,7 +456,7 @@ def test_surf_without_windows() -> None:
 
 def test_surf_stale_notice_and_truncation() -> None:
     old = FakeStore(wind=_wind(), fetched=datetime(2026, 11, 4, 0, 0, tzinfo=UTC))
-    assert bot.reply_surf(old, CFG, NOW).startswith("⚠️ Veriler güncel değil")
+    assert "⚠️ Veriler güncel değil" in bot.reply_surf(old, CFG, NOW).splitlines()[1]
     big = FakeStore(wind=_wind() * 400)
     cfg = settings.BotConfig(
         CFG.alerts,
@@ -484,3 +487,53 @@ def test_surf_handler_error_has_no_disclaimer() -> None:
     asyncio.run(handler(_update(1, sent), cast(Any, None)))
     assert "veriye ulaşamadım" in sent[0]
     _assert_surf_footer(sent[0])
+
+
+def test_header_line_formats() -> None:
+    now = datetime(2026, 11, 6, 9, 42)
+    today = datetime(2026, 11, 6, 6, 5, tzinfo=UTC)  # 09:05 local
+    assert header_line(now, today) == "📅 Cum 06.11.2026 · 🕒 09:42 · son veri 09:05"
+    yesterday = datetime(2026, 11, 5, 20, 5, tzinfo=UTC)  # 23:05 local
+    assert header_line(now, yesterday).endswith("· son veri 05.11 23:05")
+    assert header_line(now) == "📅 Cum 06.11.2026 · 🕒 09:42"
+    assert header_line(datetime(2026, 11, 7, 1, 0)).startswith("📅 Cmt ")
+    assert header_line(datetime(2026, 11, 8, 1, 0)).startswith("📅 Paz ")
+    assert header_line(datetime(2026, 11, 9, 1, 0)).startswith("📅 Pzt ")
+
+
+def test_header_on_every_command_reply() -> None:
+    store = FakeStore(beaches=_beaches(), wind=_wind())
+    for fn in (
+        bot.reply_alerts,
+        bot.reply_beaches,
+        bot.reply_wind,
+        bot.reply_surf,
+        bot.reply_help,
+    ):
+        assert fn(store, CFG, NOW).startswith("📅 Per 05.11.2026 · 🕒 10:00")
+    assert "son veri 09:00" in bot.reply_alerts(store, CFG, NOW).splitlines()[0]
+    assert "son veri" not in bot.reply_help(store, CFG, NOW).splitlines()[0]
+    assert "son veri" not in bot.reply_alerts(FakeStore(fetched=None), CFG, NOW).splitlines()[0]
+
+
+def test_wind_day_prefixes_across_midnight() -> None:
+    now = datetime(2026, 11, 5, 22, 0)
+    series = [
+        {
+            "time_local": now + timedelta(hours=i),
+            "wind_speed_10m": 30.0,
+            "wind_gusts_10m": None,
+            "wind_direction_10m": 0.0,
+        }
+        for i in range(40)
+    ]
+    text = bot.reply_wind(FakeStore(wind=series), CFG, now)
+    assert "\n22:00 " in text
+    assert "\nYarın 01:00 " in text
+    if CFG.params.wind_span_hours >= 30:
+        assert "\nCmt 07.11. " in text
+
+
+def test_summary_header_has_weekday() -> None:
+    text = format_summary([], [], [], [], [], CFG, datetime(2026, 11, 6, 8, 0))
+    assert "☀️ Günaydın! Cum 06.11.2026 özeti" in text

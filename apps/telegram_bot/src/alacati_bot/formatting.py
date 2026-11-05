@@ -34,8 +34,18 @@ def fmt_day_time(ts: datetime, today: date) -> str:
     elif delta == 1:
         day = "Yarın"
     else:
-        day = f"{_WEEKDAYS_TR[ts.weekday()]} {ts:%d.%m.}"
+        day = f"{weekday_tr(ts)} {ts:%d.%m.}"
     return f"{day} {ts:%H:%M}"
+
+
+def weekday_tr(ts: datetime | date) -> str:
+    """Short Turkish weekday name ('Pzt' ... 'Paz')."""
+    return _WEEKDAYS_TR[ts.weekday()]
+
+
+def fmt_hour_label(ts: datetime, today: date) -> str:
+    """'HH:MM' on today, else 'Yarın HH:MM' / 'Cmt 07.11. HH:MM' (shared by /ruzgar, /sorf)."""
+    return f"{ts:%H:%M}" if ts.date() == today else fmt_day_time(ts, today)
 
 
 def fmt_range(start: datetime, end: datetime, today: date) -> str:

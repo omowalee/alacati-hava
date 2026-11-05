@@ -23,6 +23,7 @@ from .messages import (
     format_beaches,
     format_surf,
     format_wind,
+    header_line,
     help_text,
     stale_notice,
     target_beach_day,
@@ -42,8 +43,14 @@ def now_local() -> datetime:
 
 
 def _finish(body: str, store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
-    """Prefix the stale-data warning (if any) and fit the Telegram length limit."""
-    return truncate_message(with_notice(body, stale_notice(store, cfg, now)), cfg)
+    """Prefix header + stale-data warning and fit the Telegram length limit."""
+    return truncate_message(_prefix(body, store, cfg, now), cfg)
+
+
+def _prefix(body: str, store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
+    fetched = store.latest_fetched_at()
+    notice = stale_notice(store, cfg, now, fetched)
+    return with_notice(body, notice, header_line(now, fetched))
 
 
 def reply_alerts(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
@@ -77,12 +84,11 @@ def reply_surf(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
         for sid, name, sport in cfg.surf_spots
     ]
     body = format_surf(spots, cfg, now)
-    notice = stale_notice(store, cfg, now)
-    return truncate_message(with_notice(body, notice), cfg, attribution_footer(cfg))
+    return truncate_message(_prefix(body, store, cfg, now), cfg, attribution_footer(cfg))
 
 
 def reply_help(store: DataStore, cfg: settings.BotConfig, now: datetime) -> str:
-    return help_text(cfg)
+    return help_text(cfg, now)
 
 
 def _make_handler(

@@ -14,11 +14,12 @@ from .formatting import (
     SURF_QUALITY_TR,
     SURF_SPORT_TR,
     compass,
-    fmt_day_time,
+    fmt_hour_label,
     fmt_number,
     fmt_range,
     kmh_to_knots,
     to_local,
+    weekday_tr,
     wind_arrow,
 )
 from .settings import BotConfig
@@ -51,9 +52,24 @@ def no_alerts_text(cfg: BotConfig) -> str:
     return f"Önümüzdeki {cfg.horizon_hours} saatte uyarı yok ✅"
 
 
-def stale_notice(store: DataStore, cfg: BotConfig, now_local: datetime) -> str:
+def header_line(now_local: datetime, fetched: datetime | None = None) -> str:
+    """'📅 Per 06.11.2026 · 🕒 09:42 · son veri 09:05' (local time; data part optional)."""
+    line = f"📅 {weekday_tr(now_local)} {now_local:%d.%m.%Y} · 🕒 {now_local:%H:%M}"
+    if fetched is not None:
+        local = to_local(fetched)
+        stamp = f"{local:%H:%M}" if local.date() == now_local.date() else f"{local:%d.%m %H:%M}"
+        line += f" · son veri {stamp}"
+    return line
+
+
+def stale_notice(
+    store: DataStore,
+    cfg: BotConfig,
+    now_local: datetime,
+    fetched: datetime | None = None,
+) -> str:
     """Turkish warning if the newest forecast is older than data.max_age_hours, else ''."""
-    fetched = store.latest_fetched_at()
+    fetched = fetched if fetched is not None else store.latest_fetched_at()
     if fetched is None:
         return "⚠️ Veriler güncel değil (güncelleme bilgisi bulunamadı)"
     local = to_local(fetched)
@@ -62,8 +78,10 @@ def stale_notice(store: DataStore, cfg: BotConfig, now_local: datetime) -> str:
     return ""
 
 
-def with_notice(body: str, notice: str) -> str:
-    return f"{notice}\n\n{body}" if notice else body
+def with_notice(body: str, notice: str, header: str = "") -> str:
+    """Header line, then the stale warning directly under it, then the body."""
+    top = f"{header}\n{notice}" if header and notice else header or notice
+    return f"{top}\n\n{body}" if top else body
 
 
 _TAG = re.compile(r"<(/?)([a-z]+)[^>]*>")
@@ -124,8 +142,9 @@ def target_beach_day(now_local: datetime, cfg: BotConfig) -> tuple[date, bool]:
     return now_local.date(), False
 
 
-def help_text(cfg: BotConfig) -> str:
-    body = (
+def help_text(cfg: BotConfig, now_local: datetime | None = None) -> str:
+    head = f"{header_line(now_local)}\n\n" if now_local is not None else ""
+    body = head + (
         "<b>Alaçatı Hava</b>\n"
         "Çeşme yarımadası için şiddetli hava uyarıları, plaj önerileri ve "
         "Alaçatı rüzgâr durumu.\n\n"
@@ -212,11 +231,11 @@ def format_beaches(rows: list[Row], is_tomorrow: bool, cfg: BotConfig) -> str:
     return with_footer(body, cfg)
 
 
-def _wind_line(r: Row) -> str:
+def _wind_line(r: Row, today: date) -> str:
     speed = float(r["wind_speed_10m"])
     direction = r.get("wind_direction_10m")
     line = (
-        f"{r['time_local']:%H:%M} {wind_arrow(direction)} {compass(direction)} · "
+        f"{fmt_hour_label(r['time_local'], today)} {wind_arrow(direction)} {compass(direction)} · "
         f"{speed:.0f} km/sa ({kmh_to_knots(speed):.0f} kn)"
     )
     gust = r.get("wind_gusts_10m")
@@ -246,7 +265,9 @@ def format_wind_section(
 ) -> str:
     steps = pick_wind_steps(series, cfg)
     parts = [f"<b>Alaçatı rüzgâr ({cfg.params.wind_span_hours} saat)</b>"]
-    parts.append("\n".join(_wind_line(r) for r in steps) if steps else "Rüzgâr verisi yok.")
+    parts.append(
+        "\n".join(_wind_line(r, now_local.date()) for r in steps) if steps else "Rüzgâr verisi yok."
+    )
     parts.append("<b>Yaklaşan uygun saatler</b>")
     wl = format_windows(windows, now_local.date())
     parts.append("\n".join(wl) if wl else "Önümüzdeki saatlerde uygun pencere yok.")
@@ -271,7 +292,7 @@ def _marker(hour: datetime, windows: list[Row]) -> str:
 
 def _surf_hour_line(r: Row, windows: list[Row], today: date) -> str:
     t = r["time_local"]
-    when = f"{t:%H:%M}" if t.date() == today else fmt_day_time(t, today)
+    when = fmt_hour_label(t, today)
     direction = r.get("wind_direction_10m")
     speed = float(r["wind_speed_10m"])
     line = f"{when} {wind_arrow(direction)} {compass(direction)} · {kmh_to_knots(speed):.0f} kn"
@@ -333,7 +354,7 @@ def format_summary(
         else "Plaj verisi henüz yok."
     )
     body = (
-        f"<b>☀️ Günaydın! {now_local:%d.%m.%Y} özeti</b>\n\n"
+        f"<b>☀️ Günaydın! {weekday_tr(now_local)} {now_local:%d.%m.%Y} özeti</b>\n\n"
         f"<b>Uyarılar</b>\n{alerts}\n\n"
         f"<b>En iyi plajlar</b>\n{beach}\n\n"
         f"{format_wind_section(series, windows, cfg, now_local)}"

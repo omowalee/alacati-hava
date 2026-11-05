@@ -13,9 +13,14 @@ spots:
       rideable: { min: 22, max: 60 }   # ~12–32 kn
       ideal:    { min: 30, max: 45 }   # ~16–24 kn
     max_gust_factor: 2.0               # gust / mean above this = too gusty
+    # Researched 2026-11-05: summer N meltem/poyraz (NW-NE) blows side-shore from the left;
+    # spring/autumn southerly (lodos, S-SW) side-shore from the right with small waves.
+    # Sources: planetwindsurfholidays.com, unplug-kitesurf.com, windy.app (Riders Beach: N, NE, S, NW),
+    # kite-and-windsurfing-guide.com.
     good_directions:                   # inclusive ranges, may wrap through 0
-      - { from_deg: 330, to_deg: 30 }  # northerly (poyraz / meltem)
-    directions_verified: false
+      - { from_deg: 315, to_deg: 45 }  # NW-N-NE (poyraz / meltem, summer)
+      - { from_deg: 160, to_deg: 225 } # S-SW (lodos, spring/autumn)
+    directions_verified: true
 
   pirlanta_kite:
     sport: kitesurf
@@ -23,6 +28,8 @@ spots:
       rideable: { min: 22, max: 50 }   # ~12–27 kn
       ideal:    { min: 28, max: 40 }   # ~15–22 kn
     max_gust_factor: 2.0
+    # Researched 2026-11-05: thermal northerly, best N / NNE / NE (kiteforum.com), station
+    # average NNW (windfinder.com Pirlanta Beach 2016-2023).
     good_directions:
-      - { from_deg: 330, to_deg: 30 }
-    directions_verified: false
+      - { from_deg: 330, to_deg: 60 }  # NNW-NE
+    directions_verified: true

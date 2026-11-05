@@ -193,11 +193,12 @@ locations:
   - id: pirlanta_kite
     name: "Pırlanta Kite"
     type: surf_spot
-    region: alacati
-    lat: 38.2320
-    lon: 26.3935
-    coords_verified: false
-    dem_elevation_m: 52   # probably inland, move onto the beach
-    marine_zone: south
-    shore_facing_deg: 200
+    region: ciftlikkoy
+    # Same spot as Pırlanta Plajı (Numan's coordinates; kite spot listings give 38.2851, 26.2508)
+    lat: 38.285115
+    lon: 26.250873
+    coords_verified: true
+    dem_elevation_m: 0
+    marine_zone: west
+    shore_facing_deg: 0
     shore_verified: false
