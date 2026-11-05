@@ -1,0 +1,567 @@
+# Generated from contracts/bigquery/marts/*.json (names, types, REQUIRED -> not_null).
+# Edit tests freely; keep columns in sync with the contracts.
+version: 2
+models:
+- name: mart_location_weather_hourly
+  description: 'one row per (location_id, time_utc), latest forecast only. Contract: contracts/bigquery/marts/mart_location_weather_hourly.json.'
+  config:
+    contract:
+      enforced: true
+  data_tests:
+  - unique_key_combination:
+      arguments:
+        combination_of_columns:
+        - location_id
+        - time_utc
+  columns:
+  - name: location_id
+    description: Location id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: location_name
+    description: Display name (TR)
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: location_type
+    description: beach | surf_spot
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - beach
+          - surf_spot
+  - name: region_id
+    description: Region id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: marine_zone_id
+    description: Marine zone supplying wave data
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: time_utc
+    description: Valid hour, UTC
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: time_local
+    description: Valid hour, Europe/Istanbul
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: temperature_2m
+    description: Open-Meteo temperature_2m [°C]
+    data_type: float64
+  - name: precipitation
+    description: Open-Meteo precipitation [mm]
+    data_type: float64
+  - name: precipitation_probability
+    description: Open-Meteo precipitation_probability [%]
+    data_type: float64
+  - name: weather_code
+    description: WMO code
+    data_type: int64
+  - name: cape
+    description: Open-Meteo cape [J/kg]
+    data_type: float64
+  - name: wind_speed_10m
+    description: Open-Meteo wind_speed_10m [km/h]
+    data_type: float64
+  - name: wind_direction_10m
+    description: Open-Meteo wind_direction_10m [degrees]
+    data_type: float64
+  - name: wind_gusts_10m
+    description: Open-Meteo wind_gusts_10m [km/h]
+    data_type: float64
+  - name: wave_height
+    description: Open-Meteo wave_height [m]
+    data_type: float64
+  - name: wave_period
+    description: Open-Meteo wave_period [s]
+    data_type: float64
+  - name: wave_direction
+    description: Open-Meteo wave_direction [degrees]
+    data_type: float64
+  - name: forecast_run_id
+    description: Latest complete ingestion run (ops.ingest_runs) the row comes from
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: forecast_fetched_at
+    description: fetched_at of the forecast row used (latest)
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: marine_fetched_at
+    description: fetched_at of the marine row used (latest)
+    data_type: timestamp
+  - name: is_past
+    description: time_utc < latest forecast fetched_at
+    data_type: bool
+    constraints:
+    - type: not_null
+- name: mart_alert_events
+  description: 'one row per hazard episode in the latest forecast run. Contract: contracts/bigquery/marts/mart_alert_events.json.'
+  config:
+    contract:
+      enforced: true
+  columns:
+  - name: episode_key
+    description: hazard + '|' + start_utc of the episode in the latest run
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - unique
+  - name: hazard
+    description: Hazard id
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values: '{{ var(''alerts'')[''hazards''].keys() | list }}'
+  - name: level
+    description: yellow | orange | red
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values: '{{ var(''alerts'')[''levels''] }}'
+  - name: start_utc
+    description: Event window start
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: end_utc
+    description: Event window end (exclusive)
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: peak_value
+    description: Max of the hazard primary variable
+    data_type: float64
+    constraints:
+    - type: not_null
+  - name: peak_unit
+    description: Unit of peak_value
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: peak_time_utc
+    description: Hour of the peak
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: affected_regions
+    description: Region ids
+    data_type: array<string>
+  - name: region_levels
+    description: Highest level per affected region
+    data_type: array<struct<region_id string, level string>>
+  - name: affected_locations
+    description: Location / marine zone ids
+    data_type: array<string>
+  - name: hours_flagged
+    description: Number of flagged hours
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 1
+  - name: peak_location_id
+    description: Location / marine zone where the peak occurs
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: forecast_run_id
+    description: Run the episode was computed from
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: generated_at
+    description: dbt run time
+    data_type: timestamp
+    constraints:
+    - type: not_null
+- name: mart_beach_scores_hourly
+  description: 'one row per (beach location_id, time_utc), latest forecast only. Contract: contracts/bigquery/marts/mart_beach_scores_hourly.json.'
+  config:
+    contract:
+      enforced: true
+  data_tests:
+  - unique_key_combination:
+      arguments:
+        combination_of_columns:
+        - location_id
+        - time_utc
+  columns:
+  - name: location_id
+    description: Beach id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: location_name
+    description: Display name
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: region_id
+    description: Region id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: time_utc
+    description: Valid hour, UTC
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: time_local
+    description: Valid hour, Europe/Istanbul
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: score
+    description: 0-100, higher = calmer (config/beach_score.yaml)
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 0
+          max_value: 100
+  - name: label_tr
+    description: Score band label
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: rank_in_hour
+    description: 1 = calmest beach in that hour; ties broken by lower gusts, then location_id
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 1
+  - name: is_daytime
+    description: Inside beach_score.yaml daytime_local_hours
+    data_type: bool
+    constraints:
+    - type: not_null
+  - name: wind_speed_10m
+    description: Open-Meteo wind_speed_10m [km/h]
+    data_type: float64
+  - name: wind_gusts_10m
+    description: Open-Meteo wind_gusts_10m [km/h]
+    data_type: float64
+  - name: wind_direction_10m
+    description: Open-Meteo wind_direction_10m [degrees]
+    data_type: float64
+  - name: wave_height
+    description: Open-Meteo wave_height [m]
+    data_type: float64
+  - name: onshore_angle_deg
+    description: 0 = straight onshore, 180 = straight offshore
+    data_type: float64
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 0
+          max_value: 180
+  - name: exposure
+    description: Exposure factor 0-1
+    data_type: float64
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+  - name: shore_verified
+    description: False = orientation not confirmed yet; UI shows a hint
+    data_type: bool
+    constraints:
+    - type: not_null
+  - name: generated_at
+    description: dbt run time
+    data_type: timestamp
+    constraints:
+    - type: not_null
+- name: mart_beach_scores_daily
+  description: 'one row per (beach, local date) over daytime hours. Contract: contracts/bigquery/marts/mart_beach_scores_daily.json.'
+  config:
+    contract:
+      enforced: true
+  data_tests:
+  - unique_key_combination:
+      arguments:
+        combination_of_columns:
+        - date_local
+        - location_id
+  columns:
+  - name: date_local
+    description: Local date (Europe/Istanbul)
+    data_type: date
+    constraints:
+    - type: not_null
+  - name: location_id
+    description: Beach id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: location_name
+    description: Display name
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: region_id
+    description: Region id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: avg_score
+    description: Mean score over daytime hours
+    data_type: float64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 0
+          max_value: 100
+  - name: min_score
+    description: Worst daytime hour
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 0
+          max_value: 100
+  - name: best_hour_local
+    description: Calmest daytime hour
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: rank_in_day
+    description: 1 = best beach of the day; ties by min_score, then location_id
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 1
+  - name: label_tr
+    description: Score band of avg_score
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: shore_verified
+    description: False = orientation not confirmed yet
+    data_type: bool
+    constraints:
+    - type: not_null
+  - name: generated_at
+    description: dbt run time
+    data_type: timestamp
+    constraints:
+    - type: not_null
+- name: mart_active_alerts
+  description: 'one row per event in ops.alert_state that is active or ended < 24 h ago. Contract: contracts/bigquery/marts/mart_active_alerts.json.'
+  config:
+    contract:
+      enforced: true
+  columns:
+  - name: event_id
+    description: alert_state.event_id
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - unique
+  - name: hazard
+    description: Hazard id
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values: '{{ var(''alerts'')[''hazards''].keys() | list }}'
+  - name: hazard_label_tr
+    description: Turkish hazard label from alerts.yaml
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: level
+    description: yellow | orange | red
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values: '{{ var(''alerts'')[''levels''] }}'
+  - name: status
+    description: active | ended (ended kept for 24 h)
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - active
+          - ended
+  - name: start_utc
+    description: Window start
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: end_utc
+    description: Window end (exclusive)
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: start_local
+    description: Window start, Europe/Istanbul
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: end_local
+    description: Window end, Europe/Istanbul
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: peak_value
+    description: Peak value
+    data_type: float64
+    constraints:
+    - type: not_null
+  - name: peak_unit
+    description: Peak unit
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: peak_time_local
+    description: Peak hour, Europe/Istanbul
+    data_type: datetime
+    constraints:
+    - type: not_null
+  - name: affected_regions
+    description: Region ids
+    data_type: array<string>
+  - name: region_levels
+    description: Highest level per affected region
+    data_type: array<struct<region_id string, level string>>
+  - name: revision
+    description: Last notified revision
+    data_type: int64
+    constraints:
+    - type: not_null
+  - name: last_updated_at
+    description: Last change
+    data_type: timestamp
+    constraints:
+    - type: not_null
+- name: mart_surf_windows
+  description: 'one row per rideable/ideal window per spot in the latest forecast run. Contract: contracts/bigquery/marts/mart_surf_windows.json.'
+  config:
+    contract:
+      enforced: true
+  data_tests:
+  - unique_key_combination:
+      arguments:
+        combination_of_columns:
+        - spot_id
+        - quality
+        - window_start_utc
+  columns:
+  - name: spot_id
+    description: Surf spot id
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: sport
+    description: windsurf | kitesurf
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - windsurf
+          - kitesurf
+  - name: quality
+    description: rideable | ideal
+    data_type: string
+    constraints:
+    - type: not_null
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - rideable
+          - ideal
+  - name: window_start_utc
+    description: First hour of the window
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: window_end_utc
+    description: End of the window (exclusive)
+    data_type: timestamp
+    constraints:
+    - type: not_null
+  - name: hours
+    description: Window length in hours
+    data_type: int64
+    constraints:
+    - type: not_null
+    data_tests:
+    - value_in_range:
+        arguments:
+          min_value: 1
+  - name: avg_wind_kmh
+    description: Mean wind speed
+    data_type: float64
+    constraints:
+    - type: not_null
+  - name: max_gust_kmh
+    description: Max gust
+    data_type: float64
+    constraints:
+    - type: not_null
+  - name: mean_direction_deg
+    description: Circular mean wind direction
+    data_type: float64
+  - name: directions_verified
+    description: False = good-direction ranges not confirmed yet
+    data_type: bool
+    constraints:
+    - type: not_null
+  - name: forecast_run_id
+    description: Run used
+    data_type: string
+    constraints:
+    - type: not_null
+  - name: generated_at
+    description: dbt run time
+    data_type: timestamp
+    constraints:
+    - type: not_null

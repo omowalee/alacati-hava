@@ -1,0 +1,41 @@
+version: 2
+
+unit_tests:
+  - name: stg_forecast_intervals_shifts_precipitation_back_one_hour
+    description: >-
+      Row T holds wind at T and precipitation of [T-1h, T). Interval [H, H+1h) must take
+      wind from row H and precipitation from row H+1h.
+    model: stg_forecast_intervals
+    given:
+      - input: ref('stg_forecast_hourly')
+        rows:
+          - { location_id: a, time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 20, wind_gusts_10m: 30, weather_code: 0, cape: 5, precipitation: 1.0 }
+          - { location_id: a, time_utc: "2026-11-05 11:00:00+00", wind_speed_10m: 25, wind_gusts_10m: 35, weather_code: 3, cape: 6, precipitation: 2.0 }
+    expect:
+      rows:
+        - { location_id: a, interval_start_utc: "2026-11-05 09:00:00+00", interval_end_utc: "2026-11-05 10:00:00+00", wind_speed_10m: null, wind_gusts_10m: null, precipitation: 1.0 }
+        - { location_id: a, interval_start_utc: "2026-11-05 10:00:00+00", interval_end_utc: "2026-11-05 11:00:00+00", wind_speed_10m: 20, wind_gusts_10m: 30, precipitation: 2.0 }
+        - { location_id: a, interval_start_utc: "2026-11-05 11:00:00+00", interval_end_utc: "2026-11-05 12:00:00+00", wind_speed_10m: 25, wind_gusts_10m: 35, precipitation: null }
+
+  - name: stg_forecast_hourly_dedupes_and_uses_latest_complete_run
+    description: >-
+      A redelivered message is counted once; a partial (not complete) run is ignored even
+      though it is the newest; the newest complete run wins.
+    model: stg_forecast_hourly
+    overrides:
+      vars:
+        now_utc: "2026-11-05 12:00:00+00"
+    given:
+      - input: ref('stg_complete_runs')
+        rows:
+          - { run_id: r1, started_at: "2026-11-05 09:00:00+00" }
+          - { run_id: r2, started_at: "2026-11-05 10:00:00+00" }
+      - input: source('raw', 'forecast_hourly')
+        rows:
+          - { location_id: a, message_id: m1, run_id: r1, fetched_at: "2026-11-05 09:00:00+00", ingested_at: "2026-11-05 09:01:00+00", time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 10 }
+          - { location_id: a, message_id: m2, run_id: r2, fetched_at: "2026-11-05 10:00:00+00", ingested_at: "2026-11-05 10:01:00+00", time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 20 }
+          - { location_id: a, message_id: m2, run_id: r2, fetched_at: "2026-11-05 10:00:00+00", ingested_at: "2026-11-05 10:02:00+00", time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 20 }
+          - { location_id: a, message_id: m3, run_id: r3, fetched_at: "2026-11-05 11:00:00+00", ingested_at: "2026-11-05 11:01:00+00", time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 99 }
+    expect:
+      rows:
+        - { location_id: a, time_utc: "2026-11-05 10:00:00+00", run_id: r2, wind_speed_10m: 20 }

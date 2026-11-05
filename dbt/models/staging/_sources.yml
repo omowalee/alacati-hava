@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Append-only Open-Meteo rows written by the loader (contracts/bigquery/raw).
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
+    schema: "{{ env_var('BQ_DATASET_RAW', 'alacati_raw') }}"
+    config:
+      freshness:
+        warn_after: { count: 3, period: hour }
+        error_after: { count: 12, period: hour }
+      loaded_at_field: fetched_at
+    tables:
+      - name: forecast_hourly
+        description: One row per (message_id, time_utc) per forecast location.
+      - name: marine_hourly
+        description: One row per (message_id, time_utc) per marine zone.
+
+  - name: ops
+    description: Operational state (contracts/bigquery/ops).
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
+    schema: "{{ env_var('BQ_DATASET_OPS', 'alacati_ops') }}"
+    tables:
+      - name: ingest_runs
+        description: One row per ingestion run; only status = 'complete' feeds the marts.
+      - name: alert_state
+        description: One row per alert event, written by the Phase 2 notifier.

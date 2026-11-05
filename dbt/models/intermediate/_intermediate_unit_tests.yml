@@ -1,0 +1,197 @@
+version: 2
+
+unit_tests:
+  # ---- episode building (step 2 + suppression of config/alerts.yaml) ------------------
+  - name: episodes_merge_hours_with_one_hour_gap_and_ignore_past_hours
+    description: Hours 10:00 and 12:00 (1 h gap <= merge_gap_hours 2) form one episode; an hour before now is ignored.
+    model: int_alert_episode_hours
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        alerts:
+          horizon_hours: 48
+          episode: { merge_gap_hours: 2, min_duration_hours: 1 }
+          hazards: { strong_wind: {}, heavy_rain: {}, thunderstorm: { suppresses: [heavy_rain] } }
+    given:
+      - input: ref('int_hazard_hourly_levels')
+        rows:
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-04 10:00:00+00", level_rank: 1, primary_value: 70 }
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 70 }
+          - { hazard: strong_wind, point_id: b, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 2, primary_value: 85 }
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 12:00:00+00", level_rank: 1, primary_value: 70 }
+    expect:
+      rows:
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 10:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 13:00:00+00" }
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 12:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 13:00:00+00" }
+
+  - name: episodes_split_hours_with_three_hour_gap
+    description: Hours 10:00 and 14:00 (3 h gap > merge_gap_hours 2) stay two episodes.
+    model: int_alert_episode_hours
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        alerts:
+          horizon_hours: 48
+          episode: { merge_gap_hours: 2, min_duration_hours: 1 }
+          hazards: { strong_wind: {}, heavy_rain: {}, thunderstorm: { suppresses: [heavy_rain] } }
+    given:
+      - input: ref('int_hazard_hourly_levels')
+        rows:
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 70 }
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 14:00:00+00", level_rank: 1, primary_value: 70 }
+    expect:
+      rows:
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 10:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 11:00:00+00" }
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 14:00:00+00", episode_start_utc: "2026-11-05 14:00:00+00", episode_end_utc: "2026-11-05 15:00:00+00" }
+
+  - name: episodes_min_duration_is_applied_after_merging
+    description: >-
+      min_duration_hours = 2. Hours 10:00 and 12:00 merge into a 3 h episode (kept);
+      the lone hour 20:00 is only 1 h long (dropped).
+    model: int_alert_episode_hours
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        alerts:
+          horizon_hours: 48
+          episode: { merge_gap_hours: 2, min_duration_hours: 2 }
+          hazards: { strong_wind: {}, heavy_rain: {}, thunderstorm: { suppresses: [heavy_rain] } }
+    given:
+      - input: ref('int_hazard_hourly_levels')
+        rows:
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 70 }
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 12:00:00+00", level_rank: 1, primary_value: 70 }
+          - { hazard: strong_wind, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 20:00:00+00", level_rank: 1, primary_value: 70 }
+    expect:
+      rows:
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 10:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 13:00:00+00" }
+        - { hazard: strong_wind, interval_start_utc: "2026-11-05 12:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 13:00:00+00" }
+
+  - name: heavy_rain_hours_inside_a_thunderstorm_episode_are_suppressed
+    description: heavy_rain at 10:00-11:00 overlaps the thunderstorm episode and is dropped; the separate hour 20:00 remains its own episode.
+    model: int_alert_episode_hours
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        alerts:
+          horizon_hours: 48
+          episode: { merge_gap_hours: 2, min_duration_hours: 1 }
+          hazards: { strong_wind: {}, heavy_rain: {}, thunderstorm: { suppresses: [heavy_rain] } }
+    given:
+      - input: ref('int_hazard_hourly_levels')
+        rows:
+          - { hazard: thunderstorm, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 0 }
+          - { hazard: thunderstorm, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 11:00:00+00", level_rank: 1, primary_value: 0 }
+          - { hazard: heavy_rain, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 12 }
+          - { hazard: heavy_rain, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 11:00:00+00", level_rank: 1, primary_value: 12 }
+          - { hazard: heavy_rain, point_id: a, point_kind: location, interval_start_utc: "2026-11-05 20:00:00+00", level_rank: 1, primary_value: 12 }
+    expect:
+      rows:
+        - { hazard: thunderstorm, interval_start_utc: "2026-11-05 10:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 12:00:00+00" }
+        - { hazard: thunderstorm, interval_start_utc: "2026-11-05 11:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 12:00:00+00" }
+        - { hazard: heavy_rain, interval_start_utc: "2026-11-05 20:00:00+00", episode_start_utc: "2026-11-05 20:00:00+00", episode_end_utc: "2026-11-05 21:00:00+00" }
+
+  # ---- hourly levels (step 1) -----------------------------------------------------------
+  - name: hourly_level_is_max_over_variables_and_thunderstorm_escalates
+    description: >-
+      L1: gust 70 = yellow, speed 63 = orange -> orange. L2: gust 105 -> red.
+      Thunderstorm: code 95 alone = yellow; CAPE 1600 = orange; precipitation 31 = red;
+      CAPE 3000 without a trigger code = nothing. heavy_rain via the 6 h sum alone = yellow.
+      Marine: 2.5 m = yellow.
+    model: int_hazard_hourly_levels
+    overrides:
+      vars:
+        alerts:
+          levels: [yellow, orange, red]
+          hazards:
+            strong_wind:
+              source: forecast
+              primary_variable: wind_gusts_10m
+              thresholds:
+                wind_gusts_10m: { yellow: 65, orange: 80, red: 100 }
+                wind_speed_10m: { yellow: 50, orange: 62, red: 75 }
+            heavy_rain:
+              source: forecast
+              primary_variable: precipitation
+              thresholds:
+                precipitation: { yellow: 10, orange: 20, red: 40 }
+                precipitation_6h_sum: { yellow: 25, orange: 40, red: 60 }
+            thunderstorm:
+              source: forecast
+              primary_variable: precipitation
+              trigger_weather_codes: [95, 96, 99]
+              base_level: yellow
+              escalate:
+                orange: { precipitation: 15, cape: 1500 }
+                red: { precipitation: 30, cape: 2500 }
+            high_waves:
+              source: marine
+              primary_variable: wave_height
+              thresholds:
+                wave_height: { yellow: 2.0, orange: 3.0, red: 4.0 }
+    given:
+      - input: ref('int_forecast_derived')
+        rows:
+          - { location_id: l1, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 3, cape: 0, wind_speed_10m: 63, wind_gusts_10m: 70, precipitation: 0, precipitation_6h_sum: 0 }
+          - { location_id: l2, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 3, cape: 0, wind_speed_10m: 10, wind_gusts_10m: 105, precipitation: 0, precipitation_6h_sum: 0 }
+          - { location_id: l3, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 95, cape: 100, wind_speed_10m: 5, wind_gusts_10m: 10, precipitation: 0, precipitation_6h_sum: 0 }
+          - { location_id: l4, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 95, cape: 1600, wind_speed_10m: 5, wind_gusts_10m: 10, precipitation: 1, precipitation_6h_sum: 1 }
+          - { location_id: l5, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 99, cape: 0, wind_speed_10m: 5, wind_gusts_10m: 10, precipitation: 31, precipitation_6h_sum: 31 }
+          - { location_id: l6, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 3, cape: 3000, wind_speed_10m: 5, wind_gusts_10m: 10, precipitation: 0, precipitation_6h_sum: 0 }
+          - { location_id: l7, interval_start_utc: "2026-11-05 10:00:00+00", weather_code: 3, cape: 0, wind_speed_10m: 5, wind_gusts_10m: 10, precipitation: 2, precipitation_6h_sum: 26 }
+      - input: ref('stg_marine_hourly')
+        rows:
+          - { marine_zone_id: north, interval_start_utc: "2026-11-05 10:00:00+00", wave_height: 2.5 }
+          - { marine_zone_id: west, interval_start_utc: "2026-11-05 10:00:00+00", wave_height: 1.0 }
+    expect:
+      rows:
+        - { hazard: strong_wind, point_id: l1, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 2, primary_value: 70 }
+        - { hazard: strong_wind, point_id: l2, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 3, primary_value: 105 }
+        - { hazard: thunderstorm, point_id: l3, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 0 }
+        - { hazard: thunderstorm, point_id: l4, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 2, primary_value: 1 }
+        - { hazard: thunderstorm, point_id: l5, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 3, primary_value: 31 }
+        - { hazard: heavy_rain, point_id: l5, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 2, primary_value: 31 }
+        - { hazard: heavy_rain, point_id: l7, point_kind: location, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 2 }
+        - { hazard: high_waves, point_id: north, point_kind: marine_zone, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 2.5 }
+
+  # ---- surf direction ----------------------------------------------------------------
+  - name: surf_good_direction_range_wraps_through_north
+    description: >-
+      good_directions 330..30 (wrapping, inclusive). 350, 10, 330, 30 and 360 are good;
+      90 and 31 are not; a good hour at 20:00 local is outside daylight (end exclusive).
+    model: int_surf_hourly_quality
+    overrides:
+      vars:
+        surf:
+          daylight_local_hours: { start: 8, end: 20 }
+          min_window_hours: 2
+    given:
+      - input: ref('stg_surf_spots')
+        format: sql
+        rows: |
+          select 's' as spot_id, 'windsurf' as sport,
+            22.0 as rideable_min_kmh, 60.0 as rideable_max_kmh,
+            30.0 as ideal_min_kmh, 45.0 as ideal_max_kmh,
+            1.6 as max_gust_factor,
+            [struct(330.0 as from_deg, 30.0 as to_deg)] as good_directions,
+            false as directions_verified
+      - input: ref('int_location_weather_hourly')
+        rows:
+          - { location_id: s, time_utc: "2026-11-05 06:00:00+00", time_local: "2026-11-05 09:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 350 }
+          - { location_id: s, time_utc: "2026-11-05 07:00:00+00", time_local: "2026-11-05 10:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 10 }
+          - { location_id: s, time_utc: "2026-11-05 08:00:00+00", time_local: "2026-11-05 11:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 90 }
+          - { location_id: s, time_utc: "2026-11-05 09:00:00+00", time_local: "2026-11-05 12:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 330 }
+          - { location_id: s, time_utc: "2026-11-05 10:00:00+00", time_local: "2026-11-05 13:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 30 }
+          - { location_id: s, time_utc: "2026-11-05 11:00:00+00", time_local: "2026-11-05 14:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 31 }
+          - { location_id: s, time_utc: "2026-11-05 12:00:00+00", time_local: "2026-11-05 15:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 360 }
+          - { location_id: s, time_utc: "2026-11-05 17:00:00+00", time_local: "2026-11-05 20:00:00", wind_speed_10m: 30, wind_gusts_10m: 35, wind_direction_10m: 0 }
+    expect:
+      rows:
+        - { time_utc: "2026-11-05 06:00:00+00", direction_ok: true, is_rideable: true, is_ideal: true }
+        - { time_utc: "2026-11-05 07:00:00+00", direction_ok: true, is_rideable: true, is_ideal: true }
+        - { time_utc: "2026-11-05 08:00:00+00", direction_ok: false, is_rideable: false, is_ideal: false }
+        - { time_utc: "2026-11-05 09:00:00+00", direction_ok: true, is_rideable: true, is_ideal: true }
+        - { time_utc: "2026-11-05 10:00:00+00", direction_ok: true, is_rideable: true, is_ideal: true }
+        - { time_utc: "2026-11-05 11:00:00+00", direction_ok: false, is_rideable: false, is_ideal: false }
+        - { time_utc: "2026-11-05 12:00:00+00", direction_ok: true, is_rideable: true, is_ideal: true }
+        - { time_utc: "2026-11-05 17:00:00+00", direction_ok: true, is_rideable: false, is_ideal: false }

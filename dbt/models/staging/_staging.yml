@@ -1,0 +1,68 @@
+version: 2
+
+models:
+  - name: stg_locations
+    columns:
+      - name: location_id
+        data_tests: [unique, not_null]
+      - name: location_type
+        data_tests:
+          - accepted_values:
+              arguments: { values: [beach, surf_spot] }
+  - name: stg_regions
+    columns:
+      - name: region_id
+        data_tests: [unique, not_null]
+  - name: stg_marine_zones
+    columns:
+      - name: marine_zone_id
+        data_tests: [unique, not_null]
+  - name: stg_hazards
+    columns:
+      - name: hazard
+        data_tests: [unique, not_null]
+  - name: stg_surf_spots
+    columns:
+      - name: spot_id
+        data_tests: [unique, not_null]
+  - name: stg_complete_runs
+    columns:
+      - name: run_id
+        data_tests: [unique, not_null]
+  - name: stg_forecast_hourly
+    description: Deduplicated forecast rows of complete runs, latest run per (location_id, time_utc).
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [location_id, time_utc] }
+    columns:
+      - name: location_id
+        data_tests: [not_null]
+      - name: time_utc
+        data_tests: [not_null]
+  - name: stg_forecast_intervals
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [location_id, interval_start_utc] }
+  - name: stg_marine_hourly
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [marine_zone_id, time_utc] }
+    columns:
+      - name: marine_zone_id
+        data_tests: [not_null]
+  - name: stg_alert_state
+    columns:
+      - name: event_id
+        data_tests: [unique]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments: { values: [active, ended] }
+      - name: hazard
+        data_tests:
+          - accepted_values:
+              arguments: { values: "{{ var('alerts')['hazards'].keys() | list }}" }
+      - name: level
+        data_tests:
+          - accepted_values:
+              arguments: { values: "{{ var('alerts')['levels'] }}" }

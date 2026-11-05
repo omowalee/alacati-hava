@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: int_hazard_hourly_levels
+    description: Flagged (hazard, point, hour interval) rows with level rank and primary value.
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [hazard, point_id, interval_start_utc] }
+    columns:
+      - name: hazard
+        data_tests:
+          - accepted_values:
+              arguments: { values: "{{ var('alerts')['hazards'].keys() | list }}" }
+      - name: level_rank
+        data_tests:
+          - value_in_range:
+              arguments: { min_value: 1, max_value: "{{ var('alerts')['levels'] | length }}" }
+  - name: int_alert_episode_hours
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [hazard, interval_start_utc] }
+  - name: int_location_weather_hourly
+    data_tests:
+      - unique_key_combination:
+          arguments: { combination_of_columns: [location_id, time_utc] }
+  - name: int_latest_complete_run
+    columns:
+      - name: run_id
+        data_tests: [unique]

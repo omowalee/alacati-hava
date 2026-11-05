@@ -1,0 +1,115 @@
+version: 2
+
+unit_tests:
+  - name: beach_score_onshore_vs_offshore_wind
+    description: >-
+      Same wind (30 km/h, gusts 40) at 12:00 local. Onshore (angle 0, exposure 1) -> 60;
+      offshore (angle 180, exposure 0.35) -> 86. Third beach: calm wind but 1.5 m waves
+      -> wave term only = 75. Fourth: no wind direction -> no score row.
+    model: mart_beach_scores_hourly
+    overrides:
+      vars:
+        now_utc: "2026-11-05 12:00:00+00"
+        beach_score:
+          daytime_local_hours: { start: 9, end: 19 }
+          offshore_exposure: 0.35
+          wind: { calm_kmh: 10, strong_kmh: 45, calm_gust_kmh: 20, strong_gust_kmh: 65 }
+          waves: { calm_wave_m: 0.3, rough_wave_m: 1.5 }
+          weights: { w_wind: 0.55, w_gust: 0.20, w_wave: 0.25 }
+          labels_tr:
+            - { min: 75, label: "Sakin" }
+            - { min: 50, label: "Hafif rüzgârlı" }
+            - { min: 25, label: "Rüzgârlı" }
+            - { min: 0, label: "Uygun değil" }
+    given:
+      - input: ref('int_location_weather_hourly')
+        rows:
+          - { location_id: b_onshore, location_name: Onshore, region_id: r, location_type: beach, shore_facing_deg: 0, shore_verified: false, time_utc: "2026-11-05 09:00:00+00", time_local: "2026-11-05 12:00:00", wind_speed_10m: 30, wind_gusts_10m: 40, wind_direction_10m: 0, wave_height: null }
+          - { location_id: b_offshore, location_name: Offshore, region_id: r, location_type: beach, shore_facing_deg: 0, shore_verified: false, time_utc: "2026-11-05 09:00:00+00", time_local: "2026-11-05 12:00:00", wind_speed_10m: 30, wind_gusts_10m: 40, wind_direction_10m: 180, wave_height: null }
+          - { location_id: b_waves, location_name: Waves, region_id: r, location_type: beach, shore_facing_deg: 0, shore_verified: false, time_utc: "2026-11-05 09:00:00+00", time_local: "2026-11-05 12:00:00", wind_speed_10m: 10, wind_gusts_10m: 20, wind_direction_10m: 0, wave_height: 1.5 }
+          - { location_id: b_nodir, location_name: NoDir, region_id: r, location_type: beach, shore_facing_deg: 0, shore_verified: false, time_utc: "2026-11-05 09:00:00+00", time_local: "2026-11-05 12:00:00", wind_speed_10m: 30, wind_gusts_10m: 40, wind_direction_10m: null, wave_height: null }
+    expect:
+      rows:
+        - { location_id: b_onshore, score: 60, label_tr: "Hafif rüzgârlı", rank_in_hour: 3, is_daytime: true, onshore_angle_deg: 0, exposure: 1 }
+        - { location_id: b_offshore, score: 86, label_tr: "Sakin", rank_in_hour: 1, is_daytime: true, onshore_angle_deg: 180, exposure: 0.35 }
+        - { location_id: b_waves, score: 75, label_tr: "Sakin", rank_in_hour: 2, is_daytime: true, onshore_angle_deg: 0, exposure: 1 }
+
+  - name: surf_windows_need_min_hours_and_use_circular_mean_direction
+    description: >-
+      Rideable hours 06,07,08 (350, 10, 0 degrees) form a 3 h window whose circular mean is 0
+      (an arithmetic mean would say 120). The lone hour 10:00 is shorter than min_window_hours.
+      Ideal hours 07,08 form a 2 h window with mean direction 5.
+    model: mart_surf_windows
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        surf:
+          daylight_local_hours: { start: 8, end: 20 }
+          min_window_hours: 2
+    given:
+      - input: ref('int_latest_complete_run')
+        rows:
+          - { run_id: r1 }
+      - input: ref('int_surf_hourly_quality')
+        rows:
+          - { spot_id: s, sport: windsurf, directions_verified: false, time_utc: "2026-11-05 06:00:00+00", wind_speed_10m: 30, wind_gusts_10m: 40, wind_direction_10m: 350, is_rideable: true, is_ideal: false }
+          - { spot_id: s, sport: windsurf, directions_verified: false, time_utc: "2026-11-05 07:00:00+00", wind_speed_10m: 32, wind_gusts_10m: 45, wind_direction_10m: 10, is_rideable: true, is_ideal: true }
+          - { spot_id: s, sport: windsurf, directions_verified: false, time_utc: "2026-11-05 08:00:00+00", wind_speed_10m: 28, wind_gusts_10m: 38, wind_direction_10m: 0, is_rideable: true, is_ideal: true }
+          - { spot_id: s, sport: windsurf, directions_verified: false, time_utc: "2026-11-05 10:00:00+00", wind_speed_10m: 30, wind_gusts_10m: 40, wind_direction_10m: 0, is_rideable: true, is_ideal: false }
+    expect:
+      rows:
+        - { spot_id: s, quality: rideable, window_start_utc: "2026-11-05 06:00:00+00", window_end_utc: "2026-11-05 09:00:00+00", hours: 3, avg_wind_kmh: 30, max_gust_kmh: 45, mean_direction_deg: 0, forecast_run_id: r1 }
+        - { spot_id: s, quality: ideal, window_start_utc: "2026-11-05 07:00:00+00", window_end_utc: "2026-11-05 09:00:00+00", hours: 2, avg_wind_kmh: 30, max_gust_kmh: 45, mean_direction_deg: 5, forecast_run_id: r1 }
+
+  - name: alert_event_aggregates_levels_regions_and_peak
+    description: >-
+      high_waves episode 10:00-12:00 over marine zones north and west. Level = max (orange);
+      peak = highest wave (3.2 m, 11:00, north); regions come from the locations using each zone.
+    model: mart_alert_events
+    overrides:
+      vars:
+        now_utc: "2026-11-05 00:00:00+00"
+        alerts:
+          levels: [yellow, orange, red]
+    given:
+      - input: ref('int_latest_complete_run')
+        rows:
+          - { run_id: r1 }
+      - input: ref('stg_hazards')
+        rows:
+          - { hazard: high_waves, peak_unit: m }
+      - input: ref('stg_locations')
+        rows:
+          - { location_id: dalyan, region_id: dalyan, marine_zone_id: north }
+          - { location_id: boyalik, region_id: ilica, marine_zone_id: north }
+          - { location_id: cesme_halk, region_id: cesme_merkez, marine_zone_id: west }
+      - input: ref('int_alert_episode_hours')
+        rows:
+          - { hazard: high_waves, interval_start_utc: "2026-11-05 10:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 12:00:00+00" }
+          - { hazard: high_waves, interval_start_utc: "2026-11-05 11:00:00+00", episode_start_utc: "2026-11-05 10:00:00+00", episode_end_utc: "2026-11-05 12:00:00+00" }
+      - input: ref('int_hazard_hourly_levels')
+        rows:
+          - { hazard: high_waves, point_id: north, point_kind: marine_zone, interval_start_utc: "2026-11-05 10:00:00+00", level_rank: 1, primary_value: 2.5 }
+          - { hazard: high_waves, point_id: north, point_kind: marine_zone, interval_start_utc: "2026-11-05 11:00:00+00", level_rank: 2, primary_value: 3.2 }
+          - { hazard: high_waves, point_id: west, point_kind: marine_zone, interval_start_utc: "2026-11-05 11:00:00+00", level_rank: 1, primary_value: 2.1 }
+    expect:
+      format: sql
+      rows: |
+        select
+          'high_waves|2026-11-05T10:00:00Z' as episode_key,
+          'high_waves' as hazard,
+          'orange' as level,
+          timestamp '2026-11-05 10:00:00+00' as start_utc,
+          timestamp '2026-11-05 12:00:00+00' as end_utc,
+          cast(3.2 as float64) as peak_value,
+          'm' as peak_unit,
+          timestamp '2026-11-05 11:00:00+00' as peak_time_utc,
+          ['cesme_merkez', 'dalyan', 'ilica'] as affected_regions,
+          [struct('cesme_merkez' as region_id, 'yellow' as level),
+           struct('dalyan' as region_id, 'orange' as level),
+           struct('ilica' as region_id, 'orange' as level)] as region_levels,
+          ['north', 'west'] as affected_locations,
+          2 as hours_flagged,
+          'north' as peak_location_id,
+          'r1' as forecast_run_id,
+          timestamp '2026-11-05 00:00:00+00' as generated_at

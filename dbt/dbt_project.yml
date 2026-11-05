@@ -1,0 +1,37 @@
+name: alacati_hava
+version: "1.0.0"
+config-version: 2
+profile: alacati_hava
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Thresholds and weights are NOT defined here: run_dbt.py passes config/*.yaml as --vars
+# (alerts, beach_score, surf, locations, regions, marine_zones).
+# The vars below are dbt-side parameters that have no home in config/.
+vars:
+  # Optional fixed "now" for reproducible runs/tests, e.g. '2026-11-05 12:00:00+00'.
+  # When unset, models use current_timestamp().
+  now_utc: null
+  # contracts/bigquery/tables.yaml: staging scans fetched_at >= now - 10 days.
+  staging_lookback_days: 10
+  # mart_location_weather_hourly keeps this many past hours next to the forecast.
+  mart_past_hours: 48
+  display_timezone: "Europe/Istanbul"
+
+models:
+  alacati_hava:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+      +contract:
+        enforced: true
