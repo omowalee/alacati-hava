@@ -45,10 +45,12 @@ class FakeStore:
         used_today: float = 0.0,
         last_complete: datetime | None = None,
         fail_sources: tuple[str, ...] = (),
+        fail_ops: bool = False,
     ) -> None:
         self.used_today = used_today
         self.last_complete = last_complete
         self.fail_sources = fail_sources
+        self.fail_ops = fail_ops
         self.raw_loaded: list[dict[str, Any]] = []
         self.ops: tuple[list[CallRecord], RunSummary] | None = None
 
@@ -64,3 +66,5 @@ class FakeStore:
 
     def load_ops(self, calls: list[CallRecord], summary: RunSummary) -> None:
         self.ops = (calls, summary)
+        if self.fail_ops:
+            raise RuntimeError("ops boom")

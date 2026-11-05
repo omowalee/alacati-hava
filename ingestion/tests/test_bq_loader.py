@@ -10,6 +10,8 @@ from google.cloud import bigquery
 
 from alacati_ingestion.bq_loader import (
     BigQueryStore,
+    LoadError,
+    OpsWriteError,
     call_log_row,
     flatten_message,
     ingest_run_row,
@@ -28,20 +30,37 @@ SETTINGS = BigQuerySettings(
 
 
 class FakeJob:
+    def __init__(self, state: str = "DONE", error_result: dict[str, str] | None = None) -> None:
+        self.state = state
+        self.error_result = error_result
+
     def result(self) -> None:
-        return None
+        if self.error_result is not None:
+            raise RuntimeError("job failed")
 
 
 class FakeClient:
     """Records load_table_from_json calls; optionally raises Conflict for given job ids."""
 
-    def __init__(self, conflict_on: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        conflict_on: set[str] | None = None,
+        existing: FakeJob | None = None,
+        fail_tables: tuple[str, ...] = (),
+    ) -> None:
         self.loads: list[dict[str, Any]] = []
         self.conflict_on = conflict_on or set()
+        self.existing = existing or FakeJob()
+        self.fail_tables = fail_tables
+
+    def get_job(self, jid: str, **kw: Any) -> FakeJob:
+        return self.existing
 
     def load_table_from_json(self, rows: Any, table: str, **kw: Any) -> FakeJob:
         if kw["job_id"] in self.conflict_on:
             raise Conflict("exists")
+        if any(t in kw["job_id"] for t in self.fail_tables):
+            raise RuntimeError("load boom")
         self.loads.append({"rows": rows, "table": table, **kw})
         return FakeJob()
 
@@ -107,11 +126,27 @@ def test_load_raw_uses_batch_load_with_deterministic_ids(config: ApiConfig) -> N
     assert first["job_config"].schema
 
 
-def test_conflict_means_already_loaded(config: ApiConfig) -> None:
+def test_conflict_with_succeeded_job_means_loaded(config: ApiConfig) -> None:
     client = FakeClient(conflict_on={f"raw_forecast_hourly_{RUN_ID}_0"})
     stored = _store(client).load_raw(RUN_ID, [_message(config, "forecast")])
     assert len(stored) == 1
     assert client.loads == []
+
+
+def test_conflict_with_failed_job_raises(config: ApiConfig) -> None:
+    jid = f"raw_forecast_hourly_{RUN_ID}_0"
+    client = FakeClient(conflict_on={jid}, existing=FakeJob("DONE", {"reason": "invalid"}))
+    store = _store(client)
+    with pytest.raises(LoadError):
+        store._load("raw", "forecast_hourly", RUN_ID, [{"a": 1}])
+    assert store.load_raw(RUN_ID, [_message(config, "forecast")]) == []
+
+
+def test_conflict_with_job_not_done_raises() -> None:
+    jid = f"raw_forecast_hourly_{RUN_ID}_0"
+    client = FakeClient(conflict_on={jid}, existing=FakeJob("RUNNING"))
+    with pytest.raises(LoadError):
+        _store(client)._load("raw", "forecast_hourly", RUN_ID, [{"a": 1}])
 
 
 def test_load_ops_writes_both_tables() -> None:
@@ -120,6 +155,24 @@ def test_load_ops_writes_both_tables() -> None:
     summary = RunSummary(RUN_ID, "manual", NOW, 3, 1, NOW, 1, 0, "complete")
     _store(client).load_ops([call], summary)
     assert [load["job_id"] for load in client.loads] == [
-        f"ops_api_call_log_{RUN_ID}_0",
         f"ops_ingest_runs_{RUN_ID}_0",
+        f"ops_api_call_log_{RUN_ID}_0",
     ]
+
+
+def test_load_ops_writes_runs_first_and_survives_call_log_failure() -> None:
+    client = FakeClient(fail_tables=("api_call_log",))
+    call = CallRecord("c1", NOW, "forecast", "x", 1.0, 200, True, 12, None, 3)
+    summary = RunSummary(RUN_ID, "manual", NOW, 3, 1, NOW, 1, 0, "complete")
+    with pytest.raises(OpsWriteError, match="api_call_log"):
+        _store(client).load_ops([call], summary)
+    assert [load["job_id"] for load in client.loads] == [f"ops_ingest_runs_{RUN_ID}_0"]
+
+
+def test_load_ops_runs_failure_still_attempts_call_log() -> None:
+    client = FakeClient(fail_tables=("ingest_runs",))
+    call = CallRecord("c1", NOW, "forecast", "x", 1.0, 200, True, 12, None, 3)
+    summary = RunSummary(RUN_ID, "manual", NOW, 3, 1, NOW, 1, 0, "complete")
+    with pytest.raises(OpsWriteError, match="ingest_runs"):
+        _store(client).load_ops([call], summary)
+    assert [load["job_id"] for load in client.loads] == [f"ops_api_call_log_{RUN_ID}_0"]

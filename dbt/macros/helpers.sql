@@ -11,7 +11,8 @@
 
 {# Quoted SQL string literal. #}
 {% macro sql_str(value) -%}
-    '{{ value | string | replace("\\", "\\\\") | replace("'", "\'") }}'
+    {#- backslashes first, then quotes; "\\'" is a backslash + quote in Jinja -#}
+    '{{ value | string | replace("\\", "\\\\") | replace("'", "\\'") }}'
 {%- endmacro %}
 
 {# UTC timestamp -> local DATETIME for display columns (*_local). #}

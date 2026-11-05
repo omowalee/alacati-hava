@@ -56,6 +56,18 @@ class RunResult:
     messages: list[dict[str, Any]] = field(default_factory=list)
     calls: list[CallRecord] = field(default_factory=list)
     note: str = ""  # e.g. why the run was aborted
+    ops_failed: bool = False  # an end-of-run ops write (ingest_runs / api_call_log) failed
+
+
+def _write_ops(
+    store: RunStore, calls: list[CallRecord], summary: RunSummary, result: RunResult
+) -> None:
+    """End-of-run ops writes; a failure is logged and flagged on the result, never raised."""
+    try:
+        store.load_ops(calls, summary)
+    except Exception:
+        log.exception("ops writes failed for run %s", summary.run_id)
+        result.ops_failed = True
 
 
 def compute_past_hours(
@@ -115,7 +127,7 @@ def execute_run(
             summary.failed_messages = expected
             summary.status = "failed"
             summary.finished_at = now()
-            store.load_ops([], summary)
+            _write_ops(store, [], summary, result)
             return result
     else:
         log.info("dry run: budget check skipped (estimated %.1f weighted calls)", estimated)
@@ -163,6 +175,6 @@ def execute_run(
     summary.status = final_status(expected, summary.succeeded_messages)
     summary.finished_at = now()
     if store is not None:
-        store.load_ops(result.calls, summary)
+        _write_ops(store, result.calls, summary, result)
     log.info("run %s finished: %s", summary.run_id, summary.status)
     return result

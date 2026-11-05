@@ -118,3 +118,13 @@ def test_dry_run_skips_budget_and_store(config: ApiConfig, points: list[Point]) 
     result = _run(config, points, None)
     assert result.summary.status == "complete"
     assert len(result.messages) == len(points)
+
+
+@respx.mock
+def test_ops_write_failure_is_flagged_not_raised(config: ApiConfig, points: list[Point]) -> None:
+    _mock_apis(config)
+    store = FakeStore(fail_ops=True)
+    result = _run(config, points, store)
+    assert result.ops_failed
+    assert store.ops is not None  # the write was attempted
+    assert result.summary.status == "complete"

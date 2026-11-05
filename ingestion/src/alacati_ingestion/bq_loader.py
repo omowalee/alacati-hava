@@ -1,7 +1,8 @@
 """Flatten weather.raw messages and load them into BigQuery with batch load jobs.
 
 No streaming inserts. Job ids are deterministic ('raw_<table>_<run_id>_<n>'), so a retried
-load of the same batch is rejected by BigQuery (Conflict) and treated as already loaded.
+load of the same batch is rejected by BigQuery (Conflict); the existing job is then inspected and
+the batch counts as loaded only if that job finished successfully.
 """
 
 from __future__ import annotations
@@ -19,6 +20,15 @@ from alacati_ingestion.runner import RunSummary
 from alacati_ingestion.settings import BigQuerySettings
 
 log = logging.getLogger(__name__)
+
+
+class LoadError(RuntimeError):
+    """A BigQuery load job failed, or a conflicting earlier job with the same id failed."""
+
+
+class OpsWriteError(RuntimeError):
+    """One or more end-of-run ops writes failed (the other write was still attempted)."""
+
 
 MAX_ROWS_PER_JOB = 50_000
 RAW_TABLE_FOR_SOURCE = {"forecast": "forecast_hourly", "marine": "marine_hourly"}
@@ -149,10 +159,24 @@ class BigQueryStore:
                     location=self._settings.location,
                 )
             except Conflict:
-                log.warning("load job %s already exists: treating as already loaded", jid)
+                self._check_existing_job(jid)
                 continue
             job.result()
             log.info("loaded %d rows into %s (job %s)", len(chunk), table, jid)
+
+    def _check_existing_job(self, jid: str) -> None:
+        """A job with this id exists: wait for it; raise unless it is DONE without error."""
+        existing = self._client.get_job(jid, location=self._settings.location)
+        try:
+            existing.result()
+        except Exception as exc:
+            raise LoadError(f"existing load job {jid} failed: {exc}") from exc
+        if existing.state != "DONE" or existing.error_result is not None:
+            raise LoadError(
+                f"existing load job {jid} is not successful: state={existing.state} "
+                f"error={existing.error_result}"
+            )
+        log.warning("load job %s already exists and succeeded: treating as loaded", jid)
 
     def load_raw(self, run_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ingested_at = datetime.now(UTC)
@@ -171,7 +195,22 @@ class BigQueryStore:
         return stored
 
     def load_ops(self, calls: list[CallRecord], summary: RunSummary) -> None:
-        if calls:
-            rows = [call_log_row(c, summary.run_id) for c in calls]
-            self._load("ops", "api_call_log", summary.run_id, rows)
-        self._load("ops", "ingest_runs", summary.run_id, [ingest_run_row(summary)])
+        """Write ingest_runs first, then api_call_log; one failing never skips the other.
+
+        Raises OpsWriteError after both were attempted if either failed.
+        """
+        failed: list[str] = []
+        writes: list[tuple[str, list[dict[str, Any]]]] = [
+            ("ingest_runs", [ingest_run_row(summary)]),
+            ("api_call_log", [call_log_row(c, summary.run_id) for c in calls]),
+        ]
+        for table, rows in writes:
+            if not rows:
+                continue
+            try:
+                self._load("ops", table, summary.run_id, rows)
+            except Exception:
+                log.exception("ops load into %s failed (run %s)", table, summary.run_id)
+                failed.append(table)
+        if failed:
+            raise OpsWriteError(f"ops writes failed: {', '.join(failed)}")

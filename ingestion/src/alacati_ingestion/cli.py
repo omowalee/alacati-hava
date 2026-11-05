@@ -1,4 +1,8 @@
-"""Command line: alacati-ingest run | setup."""
+"""Command line: alacati-ingest run | setup.
+
+Exit codes of `run`: 0 = complete, 2 = partial (some points missing), 1 = failed or any
+ops write (ingest_runs / api_call_log) failed. `setup`: 0 = ok, 1 = problems.
+"""
 
 from __future__ import annotations
 
@@ -51,7 +55,15 @@ def cmd_run(trigger: str, dry_run: bool) -> int:
             config=config, points=points, client=client, store=store, cli_trigger=trigger
         )
     _print_summary(result, dry_run)
-    return 1 if result.summary.status == "failed" else 0
+    return exit_code(result)
+
+
+def exit_code(result: RunResult) -> int:
+    """0 complete, 2 partial, 1 failed or ops write failure."""
+    if result.ops_failed:
+        log.error("ops writes failed: exiting non-zero")
+        return 1
+    return {"complete": 0, "partial": 2}.get(result.summary.status, 1)
 
 
 def cmd_setup() -> int:
@@ -64,7 +76,12 @@ def cmd_setup() -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="alacati-ingest")
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="fetch Open-Meteo data and load it into BigQuery")
+    run = sub.add_parser(
+        "run",
+        help="fetch Open-Meteo data and load it into BigQuery "
+        "(exit codes: 0 complete, 2 partial, 1 failed or ops write failure)",
+        description="Exit codes: 0 = complete, 2 = partial, 1 = failed or ops write failure.",
+    )
     run.add_argument("--trigger", choices=["schedule", "manual"], default="manual")
     run.add_argument("--dry-run", action="store_true", help="fetch and validate only")
     sub.add_parser("setup", help="create BigQuery datasets and tables")
