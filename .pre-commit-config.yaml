@@ -1,0 +1,19 @@
+# Install once per clone:  pre-commit install
+# Scan everything manually: pre-commit run --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

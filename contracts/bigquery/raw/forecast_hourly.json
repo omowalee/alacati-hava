@@ -1,0 +1,140 @@
+[
+  {
+    "name": "location_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "config/locations.yaml locations[].id"
+  },
+  {
+    "name": "message_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "weather.raw message_id; idempotency key (one value per API response)"
+  },
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Ingestion run id"
+  },
+  {
+    "name": "fetched_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "UTC time the API response was received"
+  },
+  {
+    "name": "request_latitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Latitude sent to the API"
+  },
+  {
+    "name": "request_longitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Longitude sent to the API"
+  },
+  {
+    "name": "request_past_hours",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "past_hours sent to the API (larger after downtime catch-up)"
+  },
+  {
+    "name": "request_forecast_days",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "forecast_days sent to the API"
+  },
+  {
+    "name": "grid_latitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Latitude of the grid cell the API used"
+  },
+  {
+    "name": "grid_longitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Longitude of the grid cell the API used"
+  },
+  {
+    "name": "grid_elevation_m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Elevation the API used [m]"
+  },
+  {
+    "name": "model",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Open-Meteo model selector, e.g. best_match"
+  },
+  {
+    "name": "time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Forecast valid hour (start), UTC"
+  },
+  {
+    "name": "schema_version",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "weather.raw schema version the row came from"
+  },
+  {
+    "name": "ingested_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "UTC time the row was loaded into BigQuery"
+  },
+  {
+    "name": "temperature_2m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo temperature_2m [°C]"
+  },
+  {
+    "name": "precipitation",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo precipitation [mm, sum of the preceding hour]"
+  },
+  {
+    "name": "precipitation_probability",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo precipitation_probability [%]"
+  },
+  {
+    "name": "weather_code",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "WMO weather code (95 = thunderstorm)"
+  },
+  {
+    "name": "cape",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo cape [J/kg]"
+  },
+  {
+    "name": "wind_speed_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_speed_10m [km/h]"
+  },
+  {
+    "name": "wind_direction_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_direction_10m [degrees, direction the wind blows from]"
+  },
+  {
+    "name": "wind_gusts_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_gusts_10m [km/h]"
+  }
+]

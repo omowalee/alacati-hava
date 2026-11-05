@@ -1,0 +1,68 @@
+[
+  {
+    "name": "date_local",
+    "type": "DATE",
+    "mode": "REQUIRED",
+    "description": "Local date (Europe/Istanbul)"
+  },
+  {
+    "name": "location_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Beach id"
+  },
+  {
+    "name": "location_name",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Display name"
+  },
+  {
+    "name": "region_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Region id"
+  },
+  {
+    "name": "avg_score",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Mean score over daytime hours"
+  },
+  {
+    "name": "min_score",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Worst daytime hour"
+  },
+  {
+    "name": "best_hour_local",
+    "type": "DATETIME",
+    "mode": "REQUIRED",
+    "description": "Calmest daytime hour"
+  },
+  {
+    "name": "rank_in_day",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "1 = best beach of the day; ties by min_score, then location_id"
+  },
+  {
+    "name": "label_tr",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Score band of avg_score"
+  },
+  {
+    "name": "shore_verified",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "False = orientation not confirmed yet"
+  },
+  {
+    "name": "generated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "dbt run time"
+  }
+]

@@ -1,0 +1,56 @@
+[
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Ingestion run id"
+  },
+  {
+    "name": "trigger",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "schedule | catchup | manual"
+  },
+  {
+    "name": "started_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Run start, UTC"
+  },
+  {
+    "name": "finished_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Run end, UTC; null while running"
+  },
+  {
+    "name": "past_hours",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "past_hours used for every call in the run"
+  },
+  {
+    "name": "expected_messages",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "locations + marine zones"
+  },
+  {
+    "name": "succeeded_messages",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Responses received and loaded"
+  },
+  {
+    "name": "failed_messages",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Calls that failed after retries"
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "running | complete | partial | failed. Marts use the latest complete run only"
+  }
+]

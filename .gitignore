@@ -1,0 +1,54 @@
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*service-account*.json
+*credentials*.json
+gcp-key*.json
+*-sa.json
+*.p12
+*.pfx
+.gcp/
+keys/
+secrets/
+.streamlit/secrets.toml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- dbt ---
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+profiles.yml
+
+# --- Airflow ---
+orchestration/logs/
+orchestration/plugins/__pycache__/
+airflow.db
+
+# --- Local data / scratch ---
+data/
+*.parquet
+*.log
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Claude Code local settings ---
+.claude/settings.local.json

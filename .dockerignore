@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+*.json.key
+*-sa.json
+*credentials*.json
+*service-account*.json
+keys/
+secrets/
+.git/
+.venv/
+**/__pycache__/
+dbt/target/
+dbt/logs/
+orchestration/logs/
+data/

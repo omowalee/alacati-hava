@@ -1,0 +1,148 @@
+# BigQuery table contracts: dataset, grain, partitioning, clustering.
+# Column definitions are in the JSON files next to this one (BigQuery JSON schema format,
+# usable directly with `bq mk --schema` and the Python client).
+# Location of all datasets: EU. Dataset names come from .env (defaults shown).
+
+datasets:
+  raw:     alacati_raw       # written only by the loader / Kafka BigQuery consumer
+  ops:     alacati_ops       # operational state: call log, alert state, notifications
+  staging: alacati_staging   # dbt views, internal — no contract
+  marts:   alacati_marts     # dbt tables, read by Streamlit and the bot
+
+write_method: >-
+  Batch load jobs (or Storage Write API) only; legacy streaming inserts are not used.
+  Raw tables are append-only. Load job ids are deterministic
+  ('raw_<table>_<run_id>_<n>'), so a retried load of the same batch is rejected by
+  BigQuery instead of duplicating rows. Tables with a unique_key but no natural
+  idempotency (ops.alert_state, alert_notifications, alert_deliveries, summary_log)
+  are written with MERGE on unique_key — BigQuery has no unique constraints.
+
+complete_run_rule: >-
+  Marts and the alert engine only use the latest run with ops.ingest_runs.status =
+  'complete'. A partial run is stored but ignored for alerts, so a failed marine call
+  never ends a high_waves event by mistake.
+
+tables:
+  # --- raw ----------------------------------------------------------------------
+  - name: forecast_hourly
+    dataset: raw
+    schema: raw/forecast_hourly.json
+    grain: one row per (message_id, time_utc)
+    unique_key: [message_id, time_utc]
+    partition: { field: fetched_at, type: DAY, expiration_days: 365 }
+    cluster_by: [location_id, time_utc]
+    notes: >-
+      Every hourly run re-sends the whole forecast window, so the same (location_id,
+      time_utc) appears in many runs. dbt staging dedupes on message_id (at-least-once
+      delivery) and picks the latest fetched_at per (location_id, time_utc). Staging
+      only scans fetched_at >= now - 10 days (partition pruning). If the laptop is off for
+      more than 10 days, marts are empty until the next run — acceptable for this project.
+
+  - name: marine_hourly
+    dataset: raw
+    schema: raw/marine_hourly.json
+    grain: one row per (message_id, time_utc)
+    unique_key: [message_id, time_utc]
+    partition: { field: fetched_at, type: DAY, expiration_days: 365 }
+    cluster_by: [marine_zone_id, time_utc]
+
+  # --- ops ----------------------------------------------------------------------
+  - name: api_call_log
+    dataset: ops
+    schema: ops/api_call_log.json
+    grain: one row per HTTP request to Open-Meteo
+    unique_key: [call_id]
+    partition: { field: called_at, type: DAY }
+    cluster_by: [api, point_id]
+
+  - name: ingest_runs
+    dataset: ops
+    schema: ops/ingest_runs.json
+    grain: one row per ingestion run
+    unique_key: [run_id]
+    partition: { field: started_at, type: DAY }
+    cluster_by: [status]
+
+  - name: alert_state
+    dataset: ops
+    schema: ops/alert_state.json
+    grain: one row per event (active or ended)
+    unique_key: [event_id]
+    partition: null          # tiny table
+    cluster_by: [hazard, status]
+
+  - name: alert_notifications
+    dataset: ops
+    schema: ops/alert_notifications.json
+    grain: one row per published notification (append-only audit log)
+    unique_key: [notification_id]
+    partition: { field: issued_at, type: DAY }
+    cluster_by: [hazard, event_id]
+
+  - name: alert_deliveries
+    dataset: ops
+    schema: ops/alert_deliveries.json
+    grain: one row per notification per Telegram chat
+    unique_key: [notification_id, chat_id]
+    partition: { field: sent_at, type: DAY }
+    cluster_by: [notification_id]
+    notes: The bot checks this table before sending, so a replay never sends twice.
+
+  - name: summary_log
+    dataset: ops
+    schema: ops/summary_log.json
+    grain: one morning summary per local date per chat
+    unique_key: [summary_date, chat_id]
+    partition: { field: summary_date, type: DAY }
+    cluster_by: [chat_id]
+    notes: An Airflow retry checks this table first, so the summary is sent once a day.
+
+  # --- marts (built by dbt) -----------------------------------------------------
+  - name: mart_location_weather_hourly
+    dataset: marts
+    schema: marts/mart_location_weather_hourly.json
+    grain: one row per (location_id, time_utc), latest forecast only
+    unique_key: [location_id, time_utc]
+    partition: { field: time_utc, type: DAY }
+    cluster_by: [location_id]
+
+  - name: mart_alert_events
+    dataset: marts
+    schema: marts/mart_alert_events.json
+    grain: one row per hazard episode in the latest forecast run
+    unique_key: [episode_key]
+    partition: null
+    cluster_by: [hazard]
+
+  - name: mart_beach_scores_hourly
+    dataset: marts
+    schema: marts/mart_beach_scores_hourly.json
+    grain: one row per (beach location_id, time_utc), latest forecast only
+    unique_key: [location_id, time_utc]
+    partition: { field: time_utc, type: DAY }
+    cluster_by: [location_id]
+
+  - name: mart_beach_scores_daily
+    dataset: marts
+    schema: marts/mart_beach_scores_daily.json
+    grain: one row per (beach, local date) over daytime hours
+    unique_key: [date_local, location_id]
+    partition: { field: date_local, type: DAY }
+    cluster_by: [location_id]
+
+  - name: mart_active_alerts
+    dataset: marts
+    schema: marts/mart_active_alerts.json
+    grain: one row per event in ops.alert_state that is active or ended < 24 h ago
+    unique_key: [event_id]
+    partition: null
+    cluster_by: [hazard]
+    notes: Small dbt table built from ops.alert_state; used by /uyari, the morning summary and the dashboard.
+
+  - name: mart_surf_windows
+    dataset: marts
+    schema: marts/mart_surf_windows.json
+    grain: one row per rideable/ideal window per spot in the latest forecast run
+    unique_key: [spot_id, quality, window_start_utc]
+    partition: null
+    cluster_by: [spot_id]

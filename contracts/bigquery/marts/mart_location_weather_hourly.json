@@ -1,0 +1,134 @@
+[
+  {
+    "name": "location_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Location id"
+  },
+  {
+    "name": "location_name",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Display name (TR)"
+  },
+  {
+    "name": "location_type",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "beach | surf_spot"
+  },
+  {
+    "name": "region_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Region id"
+  },
+  {
+    "name": "marine_zone_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Marine zone supplying wave data"
+  },
+  {
+    "name": "time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Valid hour, UTC"
+  },
+  {
+    "name": "time_local",
+    "type": "DATETIME",
+    "mode": "REQUIRED",
+    "description": "Valid hour, Europe/Istanbul"
+  },
+  {
+    "name": "temperature_2m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo temperature_2m [°C]"
+  },
+  {
+    "name": "precipitation",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo precipitation [mm]"
+  },
+  {
+    "name": "precipitation_probability",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo precipitation_probability [%]"
+  },
+  {
+    "name": "weather_code",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "WMO code"
+  },
+  {
+    "name": "cape",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo cape [J/kg]"
+  },
+  {
+    "name": "wind_speed_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_speed_10m [km/h]"
+  },
+  {
+    "name": "wind_direction_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_direction_10m [degrees]"
+  },
+  {
+    "name": "wind_gusts_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_gusts_10m [km/h]"
+  },
+  {
+    "name": "wave_height",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_height [m]"
+  },
+  {
+    "name": "wave_period",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_period [s]"
+  },
+  {
+    "name": "wave_direction",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_direction [degrees]"
+  },
+  {
+    "name": "forecast_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Latest complete ingestion run (ops.ingest_runs) the row comes from"
+  },
+  {
+    "name": "forecast_fetched_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "fetched_at of the forecast row used (latest)"
+  },
+  {
+    "name": "marine_fetched_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "fetched_at of the marine row used (latest)"
+  },
+  {
+    "name": "is_past",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "time_utc < latest forecast fetched_at"
+  }
+]

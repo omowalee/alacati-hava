@@ -1,0 +1,115 @@
+# Severe weather alert rules. DRAFT starting values proposed by Claude — Numan to review.
+#
+# Time convention (Open-Meteo): an hourly row labelled T holds instantaneous values at T
+# (wind, gusts, CAPE, waves, weather_code) and the precipitation sum of [T-1h, T).
+# Staging converts every row to an hour *interval*: precipitation rows -> [T-1h, T),
+# all other variables -> [T, T+1h). Alert windows are unions of these intervals:
+# start_utc = start of the first flagged interval, end_utc = end of the last (exclusive).
+#
+# Algorithm (input: latest COMPLETE run, see contracts/bigquery/tables.yaml)
+#   1. Hourly level per (point, hour, hazard) = the MAX level reached by any variable in
+#      `thresholds` (or the thunderstorm rule). Derived variables come from `derived`.
+#   2. Episode building per hazard, peninsula-wide:
+#        a. take flagged hours of all points inside [now, now + horizon_hours)
+#        b. merge flagged hours separated by a gap <= merge_gap_hours
+#        c. drop episodes shorter than min_duration_hours (applied AFTER merging)
+#        d. episode level = max hourly level; region_levels = max level per region;
+#           peak = max of primary_variable (ties: earliest hour).
+#   3. Matching against active events in alacati_ops.alert_state (same hazard):
+#        an episode matches an event if their windows overlap, or are less than
+#        match_tolerance_hours apart. If it matches several events, it continues the
+#        one with the largest overlap (then the oldest); the others are treated as absent.
+#   4. Lifecycle — always compared with what was last NOTIFIED (notified_* columns), not
+#      with the previous run, so slow drifts are caught:
+#        new      no match, episode level >= notify_min_level, and end_utc > now
+#                 (an episode entirely in the past — e.g. after catch-up — never sends "new")
+#        updated  any of: level differs from notified_level (downgrades only after
+#                 downgrade_confirm_runs consecutive runs), start or end moved more than
+#                 notify_window_shift_hours vs notified_*, a region added to notified_regions
+#        ended    end_utc <= now ("window_passed"), or the event was absent from
+#                 end_after_absent_runs consecutive complete runs ("forecast_cleared")
+#      Anything else updates alert_state silently. One notification per event per run, max.
+#      A region dropping out of an event is stored silently (no "region_removed" message).
+#      alert_state only holds events that were notified at least once: an episode below
+#      notify_min_level, or suppressed, creates no row, so absent_runs / "ended" only
+#      apply to events the user has actually heard about.
+#   5. Overlapping hazards: if `suppresses` is set, a suppressed hazard does not create a
+#      separate event while it overlaps the suppressing one (one storm = one message).
+#
+# Units are what we request from Open-Meteo: km/h, mm, m, J/kg.
+
+version: 1
+horizon_hours: 48
+levels: [yellow, orange, red]          # ordered, lowest first
+notify_min_level: yellow
+
+episode:
+  merge_gap_hours: 2
+  min_duration_hours: 1
+  match_tolerance_hours: 2             # equals merge_gap_hours on purpose
+  notify_window_shift_hours: 3
+  end_after_absent_runs: 2             # hysteresis against flapping ended -> new
+  downgrade_confirm_runs: 2            # level must stay lower for 2 runs before "updated"
+
+delivery:
+  max_notification_age_minutes: 120    # the bot drops older notifications (e.g. a new
+                                       # consumer group replaying the topic)
+
+derived:
+  precipitation_6h_sum:
+    source_variable: precipitation
+    agg: sum
+    window_hours: 6
+    alignment: trailing                # value at hour T = sum of the 6 intervals ending at T
+    flags: last_hour_only              # only hour T is flagged, not all 6
+    include_past_rows: true            # computed on the full mart time series (incl. past
+                                       # hours), so the first hours of the window are correct
+
+hazards:
+  strong_wind:
+    label_tr: "Kuvvetli rüzgâr / fırtına"
+    source: forecast
+    primary_variable: wind_gusts_10m
+    peak_unit: "km/h"
+    # Summer meltem/poyraz in Alaçatı often gusts 55–65 km/h. Yellow is set just above
+    # that so normal windy days don't trigger alerts.
+    thresholds:
+      wind_gusts_10m: { yellow: 65, orange: 80, red: 100 }   # km/h
+      wind_speed_10m: { yellow: 50, orange: 62, red: 75 }    # km/h (≈ Bft 7 / 8 / 9)
+
+  heavy_rain:
+    label_tr: "Kuvvetli yağış"
+    source: forecast
+    primary_variable: precipitation
+    peak_unit: "mm/h"
+    thresholds:
+      precipitation:        { yellow: 10, orange: 20, red: 40 }   # mm per hour
+      precipitation_6h_sum: { yellow: 25, orange: 40, red: 60 }   # mm, see `derived`
+
+  thunderstorm:
+    label_tr: "Gök gürültülü sağanak"
+    source: forecast
+    primary_variable: precipitation    # peak may be 0 mm/h for a dry thunderstorm
+    peak_unit: "mm/h"
+    suppresses: [heavy_rain]
+    # WMO codes: 95 thunderstorm; 96/99 with hail. Open-Meteo only forecasts hail
+    # (96/99) for Central Europe, so in Türkiye we will practically only see 95.
+    trigger_weather_codes: [95, 96, 99]
+    base_level: yellow                 # any trigger code -> at least yellow
+    escalate:                          # ANY listed condition met -> that level (highest wins)
+      orange: { precipitation: 15, cape: 1500 }   # mm/h, J/kg
+      red:    { precipitation: 30, cape: 2500 }
+
+  high_waves:
+    label_tr: "Yüksek dalga"
+    source: marine
+    primary_variable: wave_height
+    peak_unit: "m"
+    # Marine zones map to regions through the locations that use them (locations.yaml).
+    thresholds:
+      wave_height: { yellow: 2.0, orange: 3.0, red: 4.0 }    # m, open-sea cell
+
+disclaimer_tr: >-
+  Bu, model tahminlerine dayalı kişisel bir projedir. Resmî uyarılar için
+  Meteoroloji Genel Müdürlüğü'nü (mgm.gov.tr) takip edin.
+attribution: "Weather data by Open-Meteo.com (CC BY 4.0)"

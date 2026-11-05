@@ -1,0 +1,122 @@
+[
+  {
+    "name": "marine_zone_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "config/locations.yaml marine_zones[].id"
+  },
+  {
+    "name": "message_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "weather.raw message_id; idempotency key (one value per API response)"
+  },
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Ingestion run id"
+  },
+  {
+    "name": "fetched_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "UTC time the API response was received"
+  },
+  {
+    "name": "request_latitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Latitude sent to the API"
+  },
+  {
+    "name": "request_longitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Longitude sent to the API"
+  },
+  {
+    "name": "request_past_hours",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "past_hours sent to the API (larger after downtime catch-up)"
+  },
+  {
+    "name": "request_forecast_days",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "forecast_days sent to the API"
+  },
+  {
+    "name": "grid_latitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Latitude of the grid cell the API used"
+  },
+  {
+    "name": "grid_longitude",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Longitude of the grid cell the API used"
+  },
+  {
+    "name": "grid_elevation_m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Elevation the API used [m]"
+  },
+  {
+    "name": "model",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Open-Meteo model selector, e.g. best_match"
+  },
+  {
+    "name": "time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Forecast valid hour (start), UTC"
+  },
+  {
+    "name": "schema_version",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "weather.raw schema version the row came from"
+  },
+  {
+    "name": "ingested_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "UTC time the row was loaded into BigQuery"
+  },
+  {
+    "name": "wave_height",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_height [m]"
+  },
+  {
+    "name": "wave_direction",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_direction [degrees, direction waves come from]"
+  },
+  {
+    "name": "wave_period",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_period [s]"
+  },
+  {
+    "name": "wind_wave_height",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_wave_height [m]"
+  },
+  {
+    "name": "swell_wave_height",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo swell_wave_height [m]"
+  }
+]

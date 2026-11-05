@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alacati-hava/contracts/kafka/weather_alert.v1.schema.json",
+  "title": "weather.alerts notification v1",
+  "description": "A lifecycle change of one severe-weather event. Topic: weather.alerts. Key: event_id (all notifications of an event stay ordered in one partition). Only state changes are published: new, updated, ended. The Telegram bot renders the Turkish text (times in Europe/Istanbul) and appends the disclaimer and CC-BY attribution from config/alerts.yaml. Every notification is also written to alacati_ops.alert_notifications; deliveries to Telegram are recorded in alacati_ops.alert_deliveries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "notification_id",
+    "event_id",
+    "revision",
+    "status",
+    "change_reasons",
+    "hazard",
+    "level",
+    "previous_level",
+    "start_utc",
+    "end_utc",
+    "previous_start_utc",
+    "previous_end_utc",
+    "peak_value",
+    "peak_unit",
+    "peak_time_utc",
+    "affected_regions",
+    "region_levels",
+    "affected_locations",
+    "forecast_run_id",
+    "issued_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "notification_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Deterministic: uuid5(NAMESPACE_URL, 'alacati-hava:' + event_id + ':' + revision). A retried publish after a crash produces the same id, so the bot can dedupe."
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Stable for the whole life of the event (alacati_ops.alert_state.event_id)."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1 for 'new', +1 for each later notification of the same event."
+    },
+    "status": {
+      "enum": [
+        "new",
+        "updated",
+        "ended"
+      ]
+    },
+    "change_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "first_detected",
+          "level_up",
+          "level_down",
+          "window_shift",
+          "region_added",
+          "forecast_cleared",
+          "window_passed"
+        ]
+      },
+      "description": "Why this notification was sent; lets the bot explain an 'updated' or 'ended'."
+    },
+    "hazard": {
+      "enum": [
+        "strong_wind",
+        "heavy_rain",
+        "thunderstorm",
+        "high_waves"
+      ]
+    },
+    "level": {
+      "enum": [
+        "yellow",
+        "orange",
+        "red"
+      ],
+      "description": "Current peninsula-wide level (max of region_levels); for 'ended' the last level."
+    },
+    "previous_level": {
+      "enum": [
+        "yellow",
+        "orange",
+        "red",
+        null
+      ],
+      "description": "Level in the previous notification; null for 'new'."
+    },
+    "start_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Start of the first flagged hour."
+    },
+    "end_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "End (exclusive) of the last flagged hour."
+    },
+    "previous_start_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Window start in the previous notification; null for 'new'."
+    },
+    "previous_end_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Window end in the previous notification; null for 'new'."
+    },
+    "peak_value": {
+      "type": "number",
+      "description": "Max of the hazard's primary variable over the event."
+    },
+    "peak_unit": {
+      "type": "string",
+      "examples": [
+        "km/h",
+        "mm/h",
+        "m"
+      ]
+    },
+    "peak_time_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "affected_regions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "regions[].id from config/locations.yaml."
+    },
+    "region_levels": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Highest level per affected region, so an Ildır-only red does not read as red for Alaçatı.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "region_id",
+          "level"
+        ],
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "level": {
+            "enum": [
+              "yellow",
+              "orange",
+              "red"
+            ]
+          }
+        }
+      }
+    },
+    "affected_locations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "description": "Location ids (forecast hazards) or marine zone ids (high_waves)."
+    },
+    "forecast_run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Ingestion run whose forecast produced this change."
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "new"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "revision": {
+            "const": 1
+          },
+          "previous_level": {
+            "const": null
+          },
+          "previous_start_utc": {
+            "const": null
+          },
+          "previous_end_utc": {
+            "const": null
+          },
+          "change_reasons": {
+            "const": [
+              "first_detected"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "revision": {
+            "minimum": 2
+          },
+          "previous_level": {
+            "enum": [
+              "yellow",
+              "orange",
+              "red"
+            ]
+          },
+          "previous_start_utc": {
+            "type": "string"
+          },
+          "previous_end_utc": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "change_reasons": {
+            "items": {
+              "enum": [
+                "level_up",
+                "level_down",
+                "window_shift",
+                "region_added"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ended"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "change_reasons": {
+            "items": {
+              "enum": [
+                "forecast_cleared",
+                "window_passed"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

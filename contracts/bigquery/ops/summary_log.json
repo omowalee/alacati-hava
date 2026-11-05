@@ -1,0 +1,32 @@
+[
+  {
+    "name": "summary_date",
+    "type": "DATE",
+    "mode": "REQUIRED",
+    "description": "Local (Europe/Istanbul) date of the morning summary"
+  },
+  {
+    "name": "chat_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Telegram chat id"
+  },
+  {
+    "name": "sent_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When Telegram accepted the message"
+  },
+  {
+    "name": "telegram_message_id",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "message_id returned by Telegram"
+  },
+  {
+    "name": "forecast_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Run the summary was built from"
+  }
+]

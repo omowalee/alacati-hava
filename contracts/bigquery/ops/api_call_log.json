@@ -1,0 +1,68 @@
+[
+  {
+    "name": "call_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Unique id per HTTP request"
+  },
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Ingestion run id"
+  },
+  {
+    "name": "called_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "UTC request start"
+  },
+  {
+    "name": "api",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "forecast | marine"
+  },
+  {
+    "name": "point_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Location or marine zone id"
+  },
+  {
+    "name": "weighted_calls",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Calls as Open-Meteo counts them (variable / day weighting)"
+  },
+  {
+    "name": "http_status",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "HTTP status; null on network error"
+  },
+  {
+    "name": "success",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "True if a valid response was received"
+  },
+  {
+    "name": "duration_ms",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "Request duration"
+  },
+  {
+    "name": "error",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Error message, truncated to 500 chars"
+  },
+  {
+    "name": "past_hours",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "past_hours parameter used (catch-up after downtime)"
+  }
+]

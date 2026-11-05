@@ -1,0 +1,106 @@
+[
+  {
+    "name": "episode_key",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "hazard + '|' + start_utc of the episode in the latest run"
+  },
+  {
+    "name": "hazard",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Hazard id"
+  },
+  {
+    "name": "level",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "yellow | orange | red"
+  },
+  {
+    "name": "start_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window start"
+  },
+  {
+    "name": "end_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window end (exclusive)"
+  },
+  {
+    "name": "peak_value",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Max of the hazard primary variable"
+  },
+  {
+    "name": "peak_unit",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Unit of peak_value"
+  },
+  {
+    "name": "peak_time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Hour of the peak"
+  },
+  {
+    "name": "affected_regions",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Region ids"
+  },
+  {
+    "name": "region_levels",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "description": "Highest level per affected region",
+    "fields": [
+      {
+        "name": "region_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Region id"
+      },
+      {
+        "name": "level",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "yellow | orange | red"
+      }
+    ]
+  },
+  {
+    "name": "affected_locations",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Location / marine zone ids"
+  },
+  {
+    "name": "hours_flagged",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Number of flagged hours"
+  },
+  {
+    "name": "peak_location_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Location / marine zone where the peak occurs"
+  },
+  {
+    "name": "forecast_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Run the episode was computed from"
+  },
+  {
+    "name": "generated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "dbt run time"
+  }
+]

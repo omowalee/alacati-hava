@@ -1,0 +1,74 @@
+[
+  {
+    "name": "spot_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Surf spot id"
+  },
+  {
+    "name": "sport",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "windsurf | kitesurf"
+  },
+  {
+    "name": "quality",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "rideable | ideal"
+  },
+  {
+    "name": "window_start_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "First hour of the window"
+  },
+  {
+    "name": "window_end_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "End of the window (exclusive)"
+  },
+  {
+    "name": "hours",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Window length in hours"
+  },
+  {
+    "name": "avg_wind_kmh",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Mean wind speed"
+  },
+  {
+    "name": "max_gust_kmh",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Max gust"
+  },
+  {
+    "name": "mean_direction_deg",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Circular mean wind direction"
+  },
+  {
+    "name": "directions_verified",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "False = good-direction ranges not confirmed yet"
+  },
+  {
+    "name": "forecast_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Run used"
+  },
+  {
+    "name": "generated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "dbt run time"
+  }
+]

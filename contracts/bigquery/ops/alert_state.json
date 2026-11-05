@@ -1,0 +1,160 @@
+[
+  {
+    "name": "event_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Stable event id (UUID)"
+  },
+  {
+    "name": "hazard",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "strong_wind | heavy_rain | thunderstorm | high_waves"
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "active | ended"
+  },
+  {
+    "name": "level",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "yellow | orange | red: current, or last before ending"
+  },
+  {
+    "name": "start_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window start"
+  },
+  {
+    "name": "end_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window end (exclusive)"
+  },
+  {
+    "name": "peak_value",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Max of the hazard primary variable"
+  },
+  {
+    "name": "peak_unit",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Unit of peak_value"
+  },
+  {
+    "name": "peak_time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Hour of the peak"
+  },
+  {
+    "name": "affected_regions",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Region ids"
+  },
+  {
+    "name": "region_levels",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "description": "Highest level per affected region",
+    "fields": [
+      {
+        "name": "region_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Region id"
+      },
+      {
+        "name": "level",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "yellow | orange | red"
+      }
+    ]
+  },
+  {
+    "name": "affected_locations",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Location / marine zone ids"
+  },
+  {
+    "name": "revision",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Revision of the last notification sent (1 = new)"
+  },
+  {
+    "name": "notified_level",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Level in the last notification; compared against to decide updates"
+  },
+  {
+    "name": "notified_start_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Window start in the last notification"
+  },
+  {
+    "name": "notified_end_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Window end in the last notification"
+  },
+  {
+    "name": "notified_regions",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "affected_regions in the last notification"
+  },
+  {
+    "name": "last_notified_status",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "new | updated | ended"
+  },
+  {
+    "name": "last_notified_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the last notification was issued"
+  },
+  {
+    "name": "first_detected_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the event was first seen"
+  },
+  {
+    "name": "last_updated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Last time any field changed"
+  },
+  {
+    "name": "last_seen_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Latest complete run that still contained the event"
+  },
+  {
+    "name": "absent_runs",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "Consecutive complete runs without the event (hysteresis for 'ended')"
+  },
+  {
+    "name": "ended_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "When status became ended"
+  }
+]

@@ -1,0 +1,45 @@
+# Beach shelter score (0–100, higher = calmer). DRAFT weights — Numan to review.
+#
+#   angle      = smallest angle between wind_direction_10m (FROM) and shore_facing_deg
+#                0° = wind blows straight from the sea onto the beach (onshore)
+#   exposure   = offshore_exposure + (1 - offshore_exposure) * (1 + cos(angle)) / 2
+#                -> 1.0 onshore, offshore_exposure when the wind blows from land
+#   wind_term  = clamp((wind_speed - calm_kmh) / (strong_kmh - calm_kmh), 0, 1)
+#   gust_term  = clamp((wind_gusts - calm_gust_kmh) / (strong_gust_kmh - calm_gust_kmh), 0, 1)
+#   wave_term  = clamp((wave_height - calm_wave_m) / (rough_wave_m - calm_wave_m), 0, 1)
+#   penalty    = exposure * (w_wind * wind_term + w_gust * gust_term) + w_wave * wave_term
+#   score      = round(100 * (1 - clamp(penalty, 0, 1)))
+#
+# Rules
+#   * weights must sum to 1.0.
+#   * Missing wave data -> wave_term = 0 (score from wind only). Missing wind speed or
+#     direction -> no score row for that hour.
+#   * The wave term is not scaled by exposure and ignores wave_direction: waves come from
+#     an open-sea cell (locations.yaml), so a direction-aware term would be false precision.
+#   * Ranking ties: lower gusts first, then location_id.
+
+version: 1
+daytime_local_hours: { start: 9, end: 19 }   # Europe/Istanbul, start inclusive, end exclusive (09:00–18:59)
+
+offshore_exposure: 0.35      # land wind still makes the beach windy, but water stays flat
+
+wind:
+  calm_kmh: 10
+  strong_kmh: 45
+  calm_gust_kmh: 20
+  strong_gust_kmh: 65
+
+waves:
+  calm_wave_m: 0.3
+  rough_wave_m: 1.5
+
+weights:
+  w_wind: 0.55
+  w_gust: 0.20
+  w_wave: 0.25
+
+labels_tr:                    # score bands for the bot / dashboard
+  - { min: 75, label: "Sakin" }
+  - { min: 50, label: "Hafif rüzgârlı" }
+  - { min: 25, label: "Rüzgârlı" }
+  - { min: 0,  label: "Uygun değil" }

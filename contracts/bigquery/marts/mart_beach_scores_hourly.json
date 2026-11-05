@@ -1,0 +1,104 @@
+[
+  {
+    "name": "location_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Beach id"
+  },
+  {
+    "name": "location_name",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Display name"
+  },
+  {
+    "name": "region_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Region id"
+  },
+  {
+    "name": "time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Valid hour, UTC"
+  },
+  {
+    "name": "time_local",
+    "type": "DATETIME",
+    "mode": "REQUIRED",
+    "description": "Valid hour, Europe/Istanbul"
+  },
+  {
+    "name": "score",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "0-100, higher = calmer (config/beach_score.yaml)"
+  },
+  {
+    "name": "label_tr",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Score band label"
+  },
+  {
+    "name": "rank_in_hour",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "1 = calmest beach in that hour; ties broken by lower gusts, then location_id"
+  },
+  {
+    "name": "is_daytime",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "Inside beach_score.yaml daytime_local_hours"
+  },
+  {
+    "name": "wind_speed_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_speed_10m [km/h]"
+  },
+  {
+    "name": "wind_gusts_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_gusts_10m [km/h]"
+  },
+  {
+    "name": "wind_direction_10m",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wind_direction_10m [degrees]"
+  },
+  {
+    "name": "wave_height",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Open-Meteo wave_height [m]"
+  },
+  {
+    "name": "onshore_angle_deg",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "0 = straight onshore, 180 = straight offshore"
+  },
+  {
+    "name": "exposure",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Exposure factor 0-1"
+  },
+  {
+    "name": "shore_verified",
+    "type": "BOOL",
+    "mode": "REQUIRED",
+    "description": "False = orientation not confirmed yet; UI shows a hint"
+  },
+  {
+    "name": "generated_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "dbt run time"
+  }
+]

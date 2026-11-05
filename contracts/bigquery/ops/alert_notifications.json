@@ -1,0 +1,136 @@
+[
+  {
+    "name": "notification_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "weather.alerts notification_id (deterministic, see Kafka contract)"
+  },
+  {
+    "name": "event_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "alert_state.event_id"
+  },
+  {
+    "name": "revision",
+    "type": "INT64",
+    "mode": "REQUIRED",
+    "description": "1 for new, +1 per notification"
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "new | updated | ended"
+  },
+  {
+    "name": "change_reasons",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Why the notification was sent"
+  },
+  {
+    "name": "hazard",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Hazard id"
+  },
+  {
+    "name": "level",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Level at notification time"
+  },
+  {
+    "name": "previous_level",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Level in the previous notification; null for new"
+  },
+  {
+    "name": "previous_start_utc",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Previous window start; null for new"
+  },
+  {
+    "name": "previous_end_utc",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Previous window end; null for new"
+  },
+  {
+    "name": "start_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window start"
+  },
+  {
+    "name": "end_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Event window end (exclusive)"
+  },
+  {
+    "name": "peak_value",
+    "type": "FLOAT64",
+    "mode": "REQUIRED",
+    "description": "Max of the hazard primary variable"
+  },
+  {
+    "name": "peak_unit",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Unit of peak_value"
+  },
+  {
+    "name": "peak_time_utc",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Hour of the peak"
+  },
+  {
+    "name": "affected_regions",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Region ids"
+  },
+  {
+    "name": "region_levels",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "description": "Highest level per affected region",
+    "fields": [
+      {
+        "name": "region_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Region id"
+      },
+      {
+        "name": "level",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "yellow | orange | red"
+      }
+    ]
+  },
+  {
+    "name": "affected_locations",
+    "type": "STRING",
+    "mode": "REPEATED",
+    "description": "Location / marine zone ids"
+  },
+  {
+    "name": "forecast_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Run that triggered the change"
+  },
+  {
+    "name": "issued_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Notification time"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "notification_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "alert_notifications.notification_id"
+  },
+  {
+    "name": "chat_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Telegram chat id the message went to"
+  },
+  {
+    "name": "sent_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When Telegram accepted the message"
+  },
+  {
+    "name": "telegram_message_id",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "message_id returned by Telegram"
+  }
+]
