@@ -140,7 +140,7 @@ Copy `.env.example` to `.env` (it's git-ignored) and fill in every value. Phase 
   summary; empty = `TELEGRAM_CHAT_ID`. Failure messages always go to `TELEGRAM_CHAT_ID`.
 - `KAFKA_BOOTSTRAP_SERVERS`: keep `kafka:9092` (Compose-internal listener).
 - `GCP_ADC_DIR`: host **folder** that holds the ADC file from §1.3, with forward slashes
-  and no trailing slash, e.g. `C:/Users/numan/AppData/Roaming/gcloud`
+  and no trailing slash, e.g. `C:/Users/<you>/AppData/Roaming/gcloud`
 - `GOOGLE_APPLICATION_CREDENTIALS`: leave it unset. Local runs use gcloud ADC directly,
   and Compose sets the in-container path itself.
 - `AIRFLOW_POSTGRES_USER/PASSWORD/DB`: use letters and digits only for the password
