@@ -12,7 +12,7 @@ spots:
     wind_kmh:
       rideable: { min: 22, max: 60 }   # ~12–32 kn
       ideal:    { min: 30, max: 45 }   # ~16–24 kn
-    max_gust_factor: 1.6               # gust / mean above this = too gusty
+    max_gust_factor: 2.0               # gust / mean above this = too gusty
     good_directions:                   # inclusive ranges, may wrap through 0
       - { from_deg: 330, to_deg: 30 }  # northerly (poyraz / meltem)
     directions_verified: false
@@ -22,7 +22,7 @@ spots:
     wind_kmh:
       rideable: { min: 22, max: 50 }   # ~12–27 kn
       ideal:    { min: 28, max: 40 }   # ~15–22 kn
-    max_gust_factor: 1.5
+    max_gust_factor: 2.0
     good_directions:
       - { from_deg: 330, to_deg: 30 }
     directions_verified: false
