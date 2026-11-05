@@ -174,8 +174,7 @@ def surf_swatches() -> list[Swatch]:
         Swatch(SURF_COLORS[2], SURF_LABELS[2], "günün en iyi penceresi"),
         Swatch(SURF_COLORS[1], SURF_LABELS[1], "günün en iyi penceresi"),
         Swatch(SURF_COLORS[0], SURF_LABELS[0], "pencere yok"),
-        Swatch(NO_DATA_COLOR, NO_SPOT_LABEL, "—"),
-    ]
+    ]  # regions without a surf spot are not drawn in surf mode, so no legend entry
 
 
 def swatches_for(mode: str, labels: Sequence[Mapping[str, Any]]) -> list[Swatch]:

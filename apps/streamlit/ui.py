@@ -174,6 +174,8 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
 
     poly_rows, label_rows = [], []
     for reg in regions:
+        if mode == "Sörf" and reg["id"] not in members:
+            continue  # no surf spot in this region: don't draw it at all
         coords = [(loc["lon"], loc["lat"]) for loc in locs.values() if loc["region"] == reg["id"]]
         if not coords:
             continue
@@ -183,7 +185,8 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
             {
                 "polygon": [list(p) for p in rg.region_polygon(coords)],
                 "fill": rg.hex_to_rgba(rv.color, rg.FILL_ALPHA),
-                "tip": f"<b>{rv.name}</b><br>{rv.label}{value_part}",
+                "tip_title": rv.name,
+                "tip_body": f"{rv.label}{value_part}",
             }
         )
         lon_c, lat_c = rg.centroid(coords)
@@ -191,16 +194,22 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
 
     dot_rows = []
     for loc_id, loc in locs.items():
+        if mode == "Sörf" and loc["type"] != "surf_spot":
+            continue
         if loc_id in values and mode in ("Plaj", "Yağış", "Sörf"):
             _, text, label, color = rg.value_style(mode, values[loc_id], labels)
-            tip = f"<b>{loc['name']}</b><br>{label}" + (
-                f" · {text}" if text and text != label else ""
-            )
+            body = label + (f" · {text}" if text and text != label else "")
         else:
             color = rg.NO_DATA_COLOR
-            tip = f"<b>{loc['name']}</b>"
+            body = ""
         dot_rows.append(
-            {"lon": loc["lon"], "lat": loc["lat"], "fill": rg.hex_to_rgb(color) + [255], "tip": tip}
+            {
+                "lon": loc["lon"],
+                "lat": loc["lat"],
+                "fill": rg.hex_to_rgb(color) + [255],
+                "tip_title": loc["name"],
+                "tip_body": body,
+            }
         )
 
     layers = [
@@ -215,6 +224,8 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
             filled=True,
             pickable=True,
             auto_highlight=True,
+            # neutral hover highlight: the default blue would read as the rain colour
+            highlight_color=[255, 255, 255, 60],
         ),
         pdk.Layer(
             "ScatterplotLayer",
@@ -248,7 +259,11 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     lat0, lon0 = rg.view_bounds([(loc["lon"], loc["lat"]) for loc in locs.values()])
     view = pdk.ViewState(latitude=lat0, longitude=lon0, zoom=MAP_ZOOM)
     st.pydeck_chart(
-        pdk.Deck(layers=layers, initial_view_state=view, tooltip={"html": "{tip}"}),
+        pdk.Deck(
+            layers=layers,
+            initial_view_state=view,
+            tooltip={"html": "<b>{tip_title}</b><br/>{tip_body}"},
+        ),
         height=MAP_HEIGHT,
         width="stretch",
     )
@@ -262,10 +277,11 @@ def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     }
     st.caption(f"{notes[mode]} {day_choice}: {day:%d.%m.%Y}.")
 
+    shown = [reg for reg in regions if not (mode == "Sörf" and reg["id"] not in members)]
     per_row = 3
-    for start in range(0, len(regions), per_row):
+    for start in range(0, len(shown), per_row):
         cols = st.columns(per_row)
-        for col, reg in zip(cols, regions[start : start + per_row], strict=False):
+        for col, reg in zip(cols, shown[start : start + per_row], strict=False):
             rv = region_vals[reg["id"]]
             extra = f" · {rv.value_text}" if rv.value_text and rv.value_text != rv.label else ""
             with col, st.container(border=True):
@@ -462,5 +478,4 @@ def render_surf(cfg: AppConfig) -> None:
 def render_footer(cfg: AppConfig) -> None:
     """Disclaimer and attribution; must render even if data queries failed."""
     st.divider()
-    st.caption(cfg.disclaimer)
     st.caption(f"{cfg.attribution} · [open-meteo.com](https://open-meteo.com/)")
