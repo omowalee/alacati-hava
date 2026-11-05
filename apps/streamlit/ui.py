@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import altair as alt
 import pandas as pd
@@ -11,10 +11,10 @@ import streamlit as st
 
 import data
 import formatting as fmt
+import regions as rg
 from settings import AppConfig
 
-NOTE_UNVERIFIED = "yön doğrulanmadı"
-SURF_COLOR = [30, 90, 200]
+NOTE_SHORE_UNVERIFIED = "* Kıyı yönü henüz doğrulanmadı; skor tahmini yöne göre hesaplandı."
 
 
 def _now_local() -> datetime:
@@ -84,90 +84,199 @@ def render_alerts(cfg: AppConfig) -> None:
             )
 
 
+MAP_HEIGHT = 520
+MAP_ZOOM = 10.8
+# deck.gl TextLayer characterSet. pydeck evaluates plain strings as JS expressions, so the
+# value must be a quoted JS string literal; 'auto' collects every glyph used in the data
+# (needed for Turkish letters like ç, ş, ı, ğ).
+MAP_LABEL_CHARS = "'auto'"
+SURFACE_RGB = [26, 26, 25]
+RING_RGB = [245, 245, 243]
+
+
+def _swatch_html(color: str) -> str:
+    return (
+        f'<span style="display:inline-block;width:14px;height:14px;border-radius:3px;'
+        f"background:{color};border:1px solid rgba(128,128,128,.6);"
+        f'vertical-align:-2px;margin-right:6px"></span>'
+    )
+
+
+def _legend_html(swatches: list[rg.Swatch]) -> str:
+    items = "".join(
+        f'<span style="margin-right:18px;white-space:nowrap">{_swatch_html(s.color)}'
+        f'<b>{s.label}</b> <span style="opacity:.75">({s.range_text})</span></span>'
+        for s in swatches
+    )
+    return f'<div style="line-height:2">{items}</div>'
+
+
+def _location_values(
+    cfg: AppConfig, mode: str, day: date, daily: pd.DataFrame
+) -> dict[str, float | None]:
+    """Per-location raw value for the mode (score, mm or surf quality rank)."""
+    locs = cfg.locations_by_id
+    if mode == "Plaj":
+        d = daily[pd.to_datetime(daily["date_local"]) == pd.Timestamp(day)]
+        return {r.location_id: float(r.avg_score) for r in d.itertuples()}
+    if mode == "Yağış":
+        p = data.precip_daily(day)
+        return {
+            r.location_id: (None if pd.isna(r.precip_mm) else float(r.precip_mm))
+            for r in p.itertuples()
+        }
+    win = data.surf_windows()
+    tuples = [
+        (
+            r.spot_id,
+            r.quality,
+            fmt.to_local(_py(r.window_start_utc)),
+            fmt.to_local(_py(r.window_end_utc)),
+        )
+        for r in win.itertuples()
+    ]
+    start = datetime(day.year, day.month, day.day)
+    best = rg.best_surf_rank(tuples, start, start + timedelta(days=1))
+    return {i: float(best.get(i, 0)) for i, loc in locs.items() if loc["type"] == "surf_spot"}
+
+
 def render_map(cfg: AppConfig, hourly: pd.DataFrame) -> None:
     st.header("Harita")
+    del hourly  # the map uses daily / hourly marts through data.* helpers
+    today = _today()
+    ctrl1, ctrl2 = st.columns([3, 2])
+    with ctrl1:
+        mode = st.radio(
+            "Harita türü",
+            rg.MODES,
+            format_func=rg.MODE_LABELS.get,
+            horizontal=True,
+            key="map_mode",
+        )
+    with ctrl2:
+        day_choice = st.radio("Gün", ["Bugün", "Yarın"], horizontal=True, key="map_day")
+    day = today + timedelta(days=0 if day_choice == "Bugün" else 1)
+
+    labels = cfg.beach_score["labels_tr"]
     locs = cfg.locations_by_id
-    wnow = data.weather_now().set_index("location_id") if not data.weather_now().empty else None
+    daily = data.beach_scores_daily()
+    values = _location_values(cfg, mode, day, daily)
 
-    scores = pd.DataFrame()
-    when = ""
-    if not hourly.empty:
-        first = hourly["time_local"].min()
-        scores = hourly[hourly["time_local"] == first].set_index("location_id")
-        when = f"{pd.Timestamp(first):%H:%M}"
-
-    beach_rows, surf_rows = [], []
+    wanted_type = "surf_spot" if mode == "Sörf" else "beach"
+    members: dict[str, list[str]] = {}
     for loc_id, loc in locs.items():
-        base = {"lon": loc["lon"], "lat": loc["lat"], "name": loc["name"]}
-        if loc["type"] == "beach" and loc_id in scores.index:
-            r = scores.loc[loc_id]
-            note = f"<br><i>{NOTE_UNVERIFIED}</i>" if not r["shore_verified"] else ""
-            beach_rows.append(
-                {
-                    **base,
-                    "color": fmt.score_color(r["score"]),
-                    "tip": (
-                        f"<b>{loc['name']}</b><br>Skor: {int(r['score'])} ({r['label_tr']})<br>"
-                        f"Rüzgâr: {fmt.fmt_number(r['wind_speed_10m'], 'km/sa')} "
-                        f"{fmt.wind_arrow(r['wind_direction_10m'])} "
-                        f"{fmt.compass(r['wind_direction_10m'])}{note}"
-                    ),
-                }
-            )
-        elif loc["type"] == "surf_spot":
-            tip = f"<b>{loc['name']}</b><br>Sörf / kite noktası"
-            if wnow is not None and loc_id in wnow.index:
-                w = wnow.loc[loc_id]
-                tip += (
-                    f"<br>Rüzgâr: {fmt.fmt_number(w['wind_speed_10m'], 'km/sa')} "
-                    f"({fmt.fmt_number(fmt.kmh_to_knots(w['wind_speed_10m']), 'kt')}) "
-                    f"{fmt.wind_arrow(w['wind_direction_10m'])} "
-                    f"{fmt.compass(w['wind_direction_10m'])}"
-                )
-            surf_rows.append({**base, "color": SURF_COLOR, "tip": tip})
+        if mode == "Yağış" or loc["type"] == wanted_type:
+            members.setdefault(loc["region"], []).append(loc_id)
+    regions = cfg.locations["regions"]
+    region_vals = {
+        v.region_id: v for v in rg.aggregate_regions(mode, regions, members, values, labels)
+    }
 
-    layers = []
-    if beach_rows:
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                pd.DataFrame(beach_rows),
-                get_position="[lon, lat]",
-                get_fill_color="color",
-                get_radius=350,
-                pickable=True,
-            )
+    poly_rows, label_rows = [], []
+    for reg in regions:
+        coords = [(loc["lon"], loc["lat"]) for loc in locs.values() if loc["region"] == reg["id"]]
+        if not coords:
+            continue
+        rv = region_vals[reg["id"]]
+        value_part = f" · {rv.value_text}" if rv.value_text and rv.value_text != rv.label else ""
+        poly_rows.append(
+            {
+                "polygon": [list(p) for p in rg.region_polygon(coords)],
+                "fill": rg.hex_to_rgba(rv.color, rg.FILL_ALPHA),
+                "tip": f"<b>{rv.name}</b><br>{rv.label}{value_part}",
+            }
         )
-    if surf_rows:
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                pd.DataFrame(surf_rows),
-                get_position="[lon, lat]",
-                get_fill_color="color",
-                get_line_color=[255, 255, 255],
-                get_radius=450,
-                stroked=True,
-                line_width_min_pixels=3,
-                pickable=True,
+        lon_c, lat_c = rg.centroid(coords)
+        label_rows.append({"lon": lon_c, "lat": lat_c, "text": reg["name"]})
+
+    dot_rows = []
+    for loc_id, loc in locs.items():
+        if loc_id in values and mode in ("Plaj", "Yağış", "Sörf"):
+            _, text, label, color = rg.value_style(mode, values[loc_id], labels)
+            tip = f"<b>{loc['name']}</b><br>{label}" + (
+                f" · {text}" if text and text != label else ""
             )
+        else:
+            color = rg.NO_DATA_COLOR
+            tip = f"<b>{loc['name']}</b>"
+        dot_rows.append(
+            {"lon": loc["lon"], "lat": loc["lat"], "fill": rg.hex_to_rgb(color) + [255], "tip": tip}
         )
-    lats = [loc["lat"] for loc in locs.values()]
-    lons = [loc["lon"] for loc in locs.values()]
-    view = pdk.ViewState(latitude=sum(lats) / len(lats), longitude=sum(lons) / len(lons), zoom=10.2)
+
+    layers = [
+        pdk.Layer(
+            "PolygonLayer",
+            pd.DataFrame(poly_rows),
+            get_polygon="polygon",
+            get_fill_color="fill",
+            get_line_color=SURFACE_RGB,
+            line_width_min_pixels=2,
+            stroked=True,
+            filled=True,
+            pickable=True,
+            auto_highlight=True,
+        ),
+        pdk.Layer(
+            "ScatterplotLayer",
+            pd.DataFrame(dot_rows),
+            get_position="[lon, lat]",
+            get_fill_color="fill",
+            get_line_color=RING_RGB,
+            get_radius=180,
+            radius_min_pixels=8,
+            stroked=True,
+            line_width_min_pixels=2,
+            pickable=True,
+        ),
+        pdk.Layer(
+            "TextLayer",
+            pd.DataFrame(label_rows),
+            get_position="[lon, lat]",
+            get_text="text",
+            get_size=14,
+            # deck.gl renders only ASCII glyphs by default; add the Turkish letters explicitly.
+            character_set=MAP_LABEL_CHARS,
+            get_color=[255, 255, 255, 255],
+            get_text_anchor="'middle'",
+            get_alignment_baseline="'center'",
+            background=True,
+            get_background_color=[26, 26, 25, 170],
+            background_padding=[4, 2],
+            pickable=False,
+        ),
+    ]
+    lat0, lon0 = rg.view_bounds([(loc["lon"], loc["lat"]) for loc in locs.values()])
+    view = pdk.ViewState(latitude=lat0, longitude=lon0, zoom=MAP_ZOOM)
     st.pydeck_chart(
         pdk.Deck(layers=layers, initial_view_state=view, tooltip={"html": "{tip}"}),
+        height=MAP_HEIGHT,
         width="stretch",
     )
-    suffix = f" ({when} saati)" if when else ""
-    st.caption(
-        f"Plaj rengi: sakinlik skoru{suffix}, yeşil = sakin, kırmızı = rüzgârlı. "
-        "Mavi, beyaz çerçeveli noktalar sörf/kite noktalarıdır."
-    )
+
+    st.markdown(_legend_html(rg.swatches_for(mode, labels)), unsafe_allow_html=True)
+    notes = {
+        "Plaj": "Bölge rengi: bölgedeki plajların günlük ortalama sakinlik skoru "
+        "(koyu = daha sakin).",
+        "Yağış": "Bölge rengi: günlük toplam yağış, bölgedeki en yağışlı konum.",
+        "Sörf": "Bölge rengi: bölgedeki sörf/kite noktalarının günün en iyi penceresi.",
+    }
+    st.caption(f"{notes[mode]} {day_choice}: {day:%d.%m.%Y}.")
+
+    per_row = 3
+    for start in range(0, len(regions), per_row):
+        cols = st.columns(per_row)
+        for col, reg in zip(cols, regions[start : start + per_row], strict=False):
+            rv = region_vals[reg["id"]]
+            extra = f" · {rv.value_text}" if rv.value_text and rv.value_text != rv.label else ""
+            with col, st.container(border=True):
+                st.markdown(
+                    f"**{rv.name}**<br>{_swatch_html(rv.color)}{rv.label}{extra}",
+                    unsafe_allow_html=True,
+                )
 
 
 def _shore_note(verified: bool) -> str:
-    return "" if verified else f" ⚠ {NOTE_UNVERIFIED}"
+    return "" if verified else "*"
 
 
 def render_ranking(cfg: AppConfig, hourly: pd.DataFrame) -> None:
@@ -199,6 +308,7 @@ def render_ranking(cfg: AppConfig, hourly: pd.DataFrame) -> None:
             }
         )
         st.dataframe(table, hide_index=True, width="stretch")
+        st.caption(NOTE_SHORE_UNVERIFIED)
 
     st.subheader("Saatlik sıralama")
     if hourly.empty:
@@ -228,6 +338,7 @@ def render_ranking(cfg: AppConfig, hourly: pd.DataFrame) -> None:
         }
     )
     st.dataframe(table, hide_index=True, width="stretch")
+    st.caption(NOTE_SHORE_UNVERIFIED)
 
 
 def render_charts(cfg: AppConfig) -> None:

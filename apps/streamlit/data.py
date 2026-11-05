@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pandas as pd
@@ -152,4 +152,22 @@ def surf_windows() -> pd.DataFrame:
         "avg_wind_kmh, max_gust_kmh, mean_direction_deg, directions_verified "
         f"FROM {_table('mart_surf_windows')} WHERE window_end_utc > CURRENT_TIMESTAMP() "
         "ORDER BY spot_id, window_start_utc"
+    )
+
+
+@st.cache_data(ttl=TTL)
+def precip_daily(day: date) -> pd.DataFrame:
+    """Total precipitation (mm) per location for one Europe/Istanbul calendar day."""
+    return _run(
+        "SELECT location_id, SUM(precipitation) AS precip_mm "
+        f"FROM {_table('mart_location_weather_hourly')} "
+        "WHERE DATE(time_local) = @d AND time_utc >= TIMESTAMP_SUB(@d_ts, INTERVAL 1 DAY) "
+        "AND time_utc < TIMESTAMP_ADD(@d_ts, INTERVAL 2 DAY) "
+        "GROUP BY location_id",
+        [
+            bigquery.ScalarQueryParameter("d", "DATE", day),
+            bigquery.ScalarQueryParameter(
+                "d_ts", "TIMESTAMP", datetime(day.year, day.month, day.day, tzinfo=UTC)
+            ),
+        ],
     )
