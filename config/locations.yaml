@@ -14,6 +14,10 @@
 #                    Wind coming FROM this direction is onshore (worst for shelter).
 #   shore_verified   true once Numan confirms shore_facing_deg
 #
+# 2026-11-05 update: beach coordinates confirmed by Numan (coords_verified: true).
+# shore_facing_deg for beaches is an ESTIMATE from the Open-Meteo 90 m DEM (mean bearing
+# of sea samples 400 m around the point) — still shore_verified: false.
+#
 # Phase 0 API check (2026-11-05):
 #   * Forecast API: the 13 points fall into only 5 model grid cells, so beaches in the
 #     same cell get identical wind. Beach ranking differences come from orientation.
@@ -40,63 +44,63 @@ marine_zones:
   - { id: northeast, name: "Ildır açığı (kuzey açık deniz)",  lat: 38.4583, lon: 26.3750 }
 
 locations:
-  # --- North coast -------------------------------------------------------------
+  # --- Beaches (coordinates confirmed by Numan; orientation estimated from DEM) ---
   - id: dalyan
     name: "Dalyan Plajı"
     type: beach
     region: dalyan
-    lat: 38.3720
-    lon: 26.3150
-    coords_verified: false
-    dem_elevation_m: 17   # probably inland, move onto the beach
+    lat: 38.371993
+    lon: 26.315793
+    coords_verified: true
+    dem_elevation_m: 17
     marine_zone: north
-    shore_facing_deg: 0
+    shore_facing_deg: 90
     shore_verified: false
 
-  - id: cesme_halk
-    name: "Çeşme Halk Plajı"
+  - id: ayayorgi
+    name: "Ayayorgi Koyu"
     type: beach
     region: cesme_merkez
-    lat: 38.3265
-    lon: 26.3060
-    coords_verified: false
-    dem_elevation_m: 10   # probably inland, move onto the beach
-    marine_zone: west
-    shore_facing_deg: 290
+    lat: 38.339947
+    lon: 26.312844
+    coords_verified: true
+    dem_elevation_m: 2
+    marine_zone: north
+    shore_facing_deg: 112
     shore_verified: false
 
   - id: boyalik
     name: "Boyalık Plajı"
     type: beach
     region: ilica
-    lat: 38.3190
-    lon: 26.3440
-    coords_verified: false
-    dem_elevation_m: 8   # probably inland, move onto the beach
+    lat: 38.324754
+    lon: 26.339137
+    coords_verified: true
+    dem_elevation_m: 0
     marine_zone: north
-    shore_facing_deg: 0
+    shore_facing_deg: 315
+    shore_verified: false
+
+  - id: yildizburnu
+    name: "Yıldızburnu Halk Plajı"
+    type: beach
+    region: ilica
+    lat: 38.309898
+    lon: 26.35956
+    coords_verified: true
+    dem_elevation_m: 3
+    marine_zone: north
+    shore_facing_deg: 45
     shore_verified: false
 
   - id: ilica
-    name: "Ilıca Plajı"
+    name: "Ilıca Halk Plajı"
     type: beach
     region: ilica
-    lat: 38.3110
-    lon: 26.3700
-    coords_verified: false
+    lat: 38.308565
+    lon: 26.374708
+    coords_verified: true
     dem_elevation_m: 0
-    marine_zone: north
-    shore_facing_deg: 350
-    shore_verified: false
-
-  - id: cark
-    name: "Çark Plajı"
-    type: beach
-    region: ilica
-    lat: 38.3165
-    lon: 26.3880
-    coords_verified: false
-    dem_elevation_m: 15   # probably inland, move onto the beach
     marine_zone: north
     shore_facing_deg: 0
     shore_verified: false
@@ -105,10 +109,10 @@ locations:
     name: "Şifne Plajı"
     type: beach
     region: ilica
-    lat: 38.3300
-    lon: 26.3990
-    coords_verified: false
-    dem_elevation_m: 7   # probably inland, move onto the beach
+    lat: 38.327771
+    lon: 26.408428
+    coords_verified: true
+    dem_elevation_m: 0
     marine_zone: north
     shore_facing_deg: 315
     shore_verified: false
@@ -117,62 +121,60 @@ locations:
     name: "Ildır Plajı"
     type: beach
     region: ildir
-    lat: 38.3830
-    lon: 26.4790
-    coords_verified: false
-    dem_elevation_m: 32   # probably inland, move onto the beach
+    lat: 38.374317
+    lon: 26.479684
+    coords_verified: true
+    dem_elevation_m: 0
     marine_zone: northeast
-    shore_facing_deg: 330
+    shore_facing_deg: 315
     shore_verified: false
 
-  # --- West / south-west coast -------------------------------------------------
-  - id: ayayorgi
-    name: "Ayayorgi Koyu"
+  - id: pirlanta
+    name: "Pırlanta Plajı"
     type: beach
-    region: cesme_merkez
-    lat: 38.3105
-    lon: 26.2975
-    coords_verified: false
-    dem_elevation_m: 125   # probably inland, move onto the beach
+    region: ciftlikkoy
+    lat: 38.285115
+    lon: 26.250873
+    coords_verified: true
+    dem_elevation_m: 0
     marine_zone: west
-    shore_facing_deg: 260
+    shore_facing_deg: 0
     shore_verified: false
 
   - id: altinkum
     name: "Altınkum Plajı"
     type: beach
     region: ciftlikkoy
-    lat: 38.2685
-    lon: 26.2770
-    coords_verified: false
-    dem_elevation_m: 7   # probably inland, move onto the beach
-    marine_zone: south
-    shore_facing_deg: 190
+    lat: 38.268123
+    lon: 26.274185
+    coords_verified: true
+    dem_elevation_m: 1
+    marine_zone: west
+    shore_facing_deg: 202
     shore_verified: false
 
   - id: delikli_koy
     name: "Delikli Koy"
     type: beach
     region: ciftlikkoy
-    lat: 38.2575
-    lon: 26.2980
-    coords_verified: false
-    dem_elevation_m: 0
+    lat: 38.229243
+    lon: 26.342828
+    coords_verified: true
+    dem_elevation_m: 18
     marine_zone: south
-    shore_facing_deg: 200
+    shore_facing_deg: 180
     shore_verified: false
 
-  # --- South coast (Alaçatı) ---------------------------------------------------
-  - id: pirlanta
-    name: "Pırlanta Plajı"
+  - id: cark
+    name: "Çark Plajı"
     type: beach
     region: alacati
-    lat: 38.2335
-    lon: 26.3920
-    coords_verified: false
-    dem_elevation_m: 27   # probably inland, move onto the beach
+    lat: 38.246375
+    lon: 26.38299
+    coords_verified: true
+    dem_elevation_m: 2
     marine_zone: south
-    shore_facing_deg: 200
+    shore_facing_deg: 135
     shore_verified: false
 
   # --- Surf / kite spots ---------------------------------------------------------
