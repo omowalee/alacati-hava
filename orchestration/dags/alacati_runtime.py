@@ -13,7 +13,7 @@ import os
 import subprocess
 import threading
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ APP_ROOT = Path(os.environ.get("ALACATI_APP_ROOT", "/opt/alacati"))
 VENVS = Path(os.environ.get("ALACATI_VENVS", "/opt/venvs"))
 
 INGEST_BIN = VENVS / "ingestion" / "bin" / "alacati-ingest"
+INGEST_PYTHON = VENVS / "ingestion" / "bin" / "python"
 DBT_PYTHON = VENVS / "dbt" / "bin" / "python"
 RUN_DBT = APP_ROOT / "dbt" / "run_dbt.py"
 SUMMARY_BIN = VENVS / "bot" / "bin" / "alacati-bot-summary"
@@ -66,12 +67,13 @@ def run_cli(
     timeout: timedelta,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    on_line: Callable[[str], None] | None = None,
 ) -> int:
     """Run a command, stream its output to the task log and return the exit code.
 
     A watchdog kills the process after `timeout` (keep it below the task's
     execution_timeout); that case is reported as exit code 124 (like coreutils `timeout`).
-    `env` defaults to child_env().
+    `env` defaults to child_env(). `on_line` sees every output line (without newline).
     """
     argv = [str(c) for c in cmd]
     log.info("running: %s", " ".join(argv))
@@ -99,6 +101,8 @@ def run_cli(
             assert proc.stdout is not None
             for line in proc.stdout:
                 log.info("%s", line.rstrip())
+                if on_line is not None:
+                    on_line(line.rstrip())
             rc = proc.wait()
         except BaseException:
             # Airflow execution_timeout / task kill: do not leave an orphan behind.

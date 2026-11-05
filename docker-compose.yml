@@ -1,14 +1,16 @@
-# alacati-hava, Phase 2: Airflow (LocalExecutor + Postgres) + Telegram bot.
+# alacati-hava: Airflow (LocalExecutor + Postgres) + Telegram bot (Phase 2)
+#               + Kafka streaming layer (Phase 3).
 #
 # Start / update:   docker compose up -d --build
 # Logs:             docker compose logs -f airflow-scheduler telegram-bot
+#                   docker compose logs -f bq-consumer alert-engine telegram-alerts
 # Stop:             docker compose stop        (containers stay; `start` resumes)
 # See docs/laptop-server.md for the laptop-as-server setup.
 #
 # Every secret comes from .env (git-ignored; template: .env.example), passed to each
 # service explicitly through `environment:` (no env_file).
-# Honest scale note: Airflow is not needed at this data size (17 HTTP calls/hour);
-# it is here to demonstrate the architecture.
+# Honest scale note: neither Airflow nor Kafka is needed at this data size (17 HTTP
+# calls / 17 small messages per hour); they are here to demonstrate the architecture.
 
 name: alacati-hava
 
@@ -60,7 +62,14 @@ x-bigquery-env: &bigquery-env
 
 x-telegram-env: &telegram-env
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+  # Ops / private chat (failure notifications, commands).
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+  # Alerts + morning summary; empty = same as TELEGRAM_CHAT_ID.
+  TELEGRAM_BROADCAST_CHAT_ID: ${TELEGRAM_BROADCAST_CHAT_ID:-}
+
+# Kafka clients (ingest producer, consumers, bot listener). Compose-internal listener only.
+x-kafka-env: &kafka-env
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
 
 # No `env_file: .env` anywhere: each service gets only the variables it needs.
 # Airflow's own settings, identical in every Airflow container:
@@ -166,9 +175,11 @@ services:
     # LocalExecutor: tasks (ingest, dbt, summary) run as child processes of this
     # container, so it gets the largest memory budget and the component settings.
     environment:
-      <<: [*airflow-env, *bigquery-env, *telegram-env]
+      <<: [*airflow-env, *bigquery-env, *telegram-env, *kafka-env]
       ALACATI_CONFIG_DIR: /opt/alacati/config
       DBT_PROFILES_DIR: /opt/alacati/dbt-profiles
+      # Phase 3: `alacati-ingest run` publishes to weather.raw; the bq-consumer loads it.
+      INGEST_SINK: kafka
       # airflow_maintenance `db clean` only (Airflow 3 blocks the normal variable inside
       # tasks; alacati_runtime strips this one from ingest/dbt/bot subprocesses).
       ALACATI_MAINTENANCE_DB_CONN: *airflow-db-conn
@@ -195,6 +206,9 @@ services:
       # Tasks report to the Execution API on the api-server.
       airflow-api-server:
         condition: service_healthy
+      # The ingest task publishes to weather.raw (topics must exist: no auto-create).
+      kafka-init:
+        condition: service_completed_successfully
 
   airflow-dag-processor:
     <<: *airflow-common
@@ -244,6 +258,154 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # --- Phase 3: Kafka streaming layer --------------------------------------------------
+  kafka:
+    # Official Apache image, single broker in KRaft mode (broker + controller in one
+    # process), replication factor 1: fine for a portfolio, not for production.
+    image: apache/kafka:4.3.2
+    environment:
+      # Not a secret: a fixed id so the formatted data volume always matches.
+      CLUSTER_ID: 7SYpJy2pSFS-tGju5bmchQ
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      # Compose-internal only: no host port is published.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly by kafka-init (contracts/README.md).
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # The CLI tools start their own JVM: give them a small heap, not the broker's.
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS=-Xmx64m /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+      start_interval: 5s
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  kafka-init:
+    # One-shot, idempotent: create the topics if missing, (re)apply their retention.
+    # segment.ms = 1 day: at ~17 small messages/hour a 1 GB segment would never roll,
+    # and retention only deletes closed segments.
+    image: apache/kafka:4.3.2
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx128m
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        bin=/opt/kafka/bin
+        create() {  # topic partitions retention_ms
+          $$bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$$1" --partitions "$$2" --replication-factor 1 \
+            --config retention.ms="$$3" --config segment.ms=86400000
+          $$bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics \
+            --entity-name "$$1" --add-config retention.ms="$$3",segment.ms=86400000
+        }
+        create weather.raw 3 604800000       # 7 days
+        create weather.alerts 1 2592000000   # 30 days
+        $$bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic 'weather\..*'
+    mem_limit: 384m
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    logging: *default-logging
+
+  bq-consumer:
+    build:
+      context: .
+      dockerfile: docker/streaming/Dockerfile
+    image: alacati-hava/streaming:latest
+    command: ["/opt/venvs/streaming/bin/alacati-bq-consumer"]
+    environment:
+      <<: [*bigquery-env, *kafka-env]
+      ALACATI_CONFIG_DIR: /opt/alacati/config
+    volumes:
+      - *mount-config
+      - *mount-contracts
+      - *mount-adc
+    init: true
+    mem_limit: 384m
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    logging: *default-logging
+
+  alert-engine:
+    # Same image as bq-consumer (built by that service), other command.
+    image: alacati-hava/streaming:latest
+    pull_policy: never   # local image, built by its sibling service
+    command: ["/opt/venvs/streaming/bin/alacati-alert-engine"]
+    environment:
+      <<: [*bigquery-env, *kafka-env]
+      ALACATI_CONFIG_DIR: /opt/alacati/config
+    volumes:
+      - *mount-config
+      - *mount-contracts
+      - *mount-adc
+    init: true
+    mem_limit: 384m
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      bq-consumer:
+        condition: service_started
+    logging: *default-logging
+
+  telegram-alerts:
+    # weather.alerts -> Telegram (consumer group telegram-bot). Same image as telegram-bot
+    # (built by that service), other command.
+    image: alacati-hava/telegram-bot:latest
+    pull_policy: never   # local image, built by its sibling service
+    command: ["/opt/venvs/bot/bin/alacati-bot-alerts"]
+    environment:
+      <<: [*bigquery-env, *telegram-env, *kafka-env]
+      ALACATI_CONFIG_DIR: /opt/alacati/config
+    volumes:
+      - *mount-config
+      - *mount-contracts
+      - *mount-adc
+    init: true
+    healthcheck:
+      # getMe on the Bot API: token valid + Telegram reachable. No message is sent.
+      test: ["CMD", "python", "/opt/alacati/docker/bot/healthcheck.py"]
+      interval: 5m
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    mem_limit: 256m
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      telegram-bot:
+        condition: service_started
+    logging: *default-logging
+
 volumes:
   postgres-data:
   airflow-logs:
+  kafka-data:

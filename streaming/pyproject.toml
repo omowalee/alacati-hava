@@ -1,0 +1,63 @@
+[project]
+name = "alacati-streaming"
+version = "0.1.0"
+description = "Kafka consumers for alacati-hava: weather.raw -> BigQuery loader and the alert engine"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Reused, not copied: weather.raw validation (messages.py), BigQuery flatten/load
+    # (bq_loader.py), settings and contract helpers.
+    "alacati-ingestion",
+    "confluent-kafka>=2.6",
+    "google-cloud-bigquery>=3.27",
+    "jsonschema[format-nongpl]>=4.23",
+    "pyyaml>=6.0",
+]
+
+[tool.uv.sources]
+alacati-ingestion = { path = "../ingestion", editable = true }
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "types-pyyaml>=6.0",
+]
+
+[project.scripts]
+alacati-bq-consumer = "alacati_streaming.bq_consumer:main"
+alacati-alert-engine = "alacati_streaming.alert_engine:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alacati_streaming"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["alacati_streaming"]
+known-third-party = ["alacati_ingestion"]
+
+[tool.ruff.lint.per-file-ignores]
+# Table names in these queries come from the contracts and settings, never from user input.
+"src/alacati_streaming/alert_store.py" = ["S608"]
+"tests/*" = ["S"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+# Type-check against the ingestion sources (the package ships no py.typed marker).
+mypy_path = "src:../ingestion/src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

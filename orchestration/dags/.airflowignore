@@ -1,2 +1,4 @@
 # Helper modules, not DAG files (glob syntax, Airflow 3 default).
 alacati_runtime.py
+# Helper scripts run as subprocesses (e.g. with the ingestion venv), not DAG files.
+scripts/

@@ -30,6 +30,7 @@ dbt/.user.yml
 dbt/dbt_packages/
 ingestion/tests/
 apps/telegram_bot/tests/
+streaming/tests/
 apps/streamlit/
 tests/
 docs/

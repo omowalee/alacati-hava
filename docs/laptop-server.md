@@ -1,6 +1,6 @@
 # Running alacati-hava on a Windows laptop as a server
 
-Phase 2 runs on Numan's Windows laptop with Docker Desktop (WSL2 backend, x86_64).
+The stack runs on Numan's Windows laptop with Docker Desktop (WSL2 backend, x86_64).
 `docker-compose.yml` at the repo root starts:
 
 | Service                 | What it does                                                  | Memory limit |
@@ -11,16 +11,25 @@ Phase 2 runs on Numan's Windows laptop with Docker Desktop (WSL2 backend, x86_64
 | `airflow-scheduler`     | Scheduler + LocalExecutor: runs ingest, dbt, morning summary  | 2 GB         |
 | `airflow-dag-processor` | Parses `orchestration/dags/` (required in Airflow 3)          | 768 MB       |
 | `telegram-bot`          | `alacati-bot`: long-polling Telegram bot                      | 384 MB       |
+| `kafka`                 | Apache Kafka 4.3 (official `apache/kafka`), 1 broker, KRaft, heap 512 MB | 1 GB |
+| `kafka-init`            | One-shot: creates / re-configures the topics, then exits      | 384 MB (exits) |
+| `bq-consumer`           | `alacati-bq-consumer`: `weather.raw` → BigQuery raw tables    | 384 MB       |
+| `alert-engine`          | `alacati-alert-engine`: `weather.raw` → lifecycle → `weather.alerts` | 384 MB |
+| `telegram-alerts`       | `alacati-bot-alerts`: `weather.alerts` → Telegram (bot image) | 256 MB       |
 
-That's about 4.7 GB in the worst case, which fits on a 15 GB laptop. Honest scale note: at
-17 HTTP calls per hour, Airflow and Postgres are not needed. They are here to
-demonstrate the architecture.
+That's about 6.7 GB in the worst case, which fits on a 15 GB laptop (set `.wslconfig`
+`memory=8GB` or more, §1.1). Honest scale note: at 17 HTTP calls and 17 small messages
+per hour, neither Airflow/Postgres nor Kafka is needed. They are here to demonstrate the
+architecture.
 
 DAGs (`orchestration/dags/`, times in UTC unless stated):
 
-- `weather_hourly`: runs at minute 5 of every hour. `ingest` → `dbt_build` → `dbt_source_freshness`.
-  Ingest exit code 2 (partial) logs a warning and dbt still runs. Exit code 1 fails the task.
-  Freshness only warns and never fails the run.
+- `weather_hourly`: runs at minute 5 of every hour. `ingest` → `wait_raw_loaded` →
+  `dbt_build` → `dbt_source_freshness`. `ingest` publishes to Kafka (`INGEST_SINK=kafka`)
+  and passes its `RUN_ID` on; `wait_raw_loaded` polls BigQuery every 15 s until the
+  `bq-consumer` has loaded every published message of that run (fails after 10 min,
+  which sends the failure message). Ingest exit code 2 (partial) logs a warning and dbt
+  still runs. Exit code 1 fails the task. Freshness only warns and never fails the run.
 - `morning_summary`: runs at 08:00 Europe/Istanbul. It sends the Telegram morning summary,
   which is idempotent through `alacati_ops.summary_log`. Scheduled runs are skipped after
   `summary.stale_after_local_hour` in `config/bot.yaml` (12:00 local time), and also when
@@ -127,6 +136,9 @@ on a cloud host. Personal user credentials on a laptop are fine for this portfol
 Copy `.env.example` to `.env` (it's git-ignored) and fill in every value. Phase 2 needs:
 
 - `GCP_PROJECT_ID`, `BQ_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+- `TELEGRAM_BROADCAST_CHAT_ID` (Phase 3, optional): chat for alerts and the morning
+  summary; empty = `TELEGRAM_CHAT_ID`. Failure messages always go to `TELEGRAM_CHAT_ID`.
+- `KAFKA_BOOTSTRAP_SERVERS`: keep `kafka:9092` (Compose-internal listener).
 - `GCP_ADC_DIR`: host **folder** that holds the ADC file from §1.3, with forward slashes
   and no trailing slash, e.g. `C:/Users/numan/AppData/Roaming/gcloud`
 - `GOOGLE_APPLICATION_CREDENTIALS`: leave it unset. Local runs use gcloud ADC directly,
@@ -216,7 +228,7 @@ Each DAG file checks this at parse time and shows an import error if someone bre
 
 | DAG                   | Task limits (attempts), retry delay                               | Worst case | `dagrun_timeout` |
 |-----------------------|-------------------------------------------------------------------|------------|------------------|
-| `weather_hourly`      | ingest 8 min (2), dbt build 12 min (2), freshness 4 min (1); 2 min | 48 min     | 55 min (before the next slot) |
+| `weather_hourly`      | ingest 7 min (2), wait_raw_loaded 11 min (1), dbt build 10 min (2), freshness 4 min (1); 2 min | 53 min | 55 min (before the next slot) |
 | `morning_summary`     | send 5 min (4); 5 min                                              | 35 min     | 45 min           |
 | `airflow_maintenance` | db clean 20 min (1), log prune 10 min (1)                          | 30 min     | 45 min           |
 
@@ -285,3 +297,85 @@ What to do:
 No message at all while something is clearly broken means the dag-processor is down or
 Telegram is unreachable: check `docker compose ps` and
 `docker compose logs airflow-dag-processor`.
+
+## 7. Kafka streaming layer (Phase 3)
+
+```
+alacati-ingest (Airflow task) ──► weather.raw (3 partitions, 7 d) ──┬─► bq-consumer ──► alacati_raw.*
+                                                                    └─► alert-engine ─► weather.alerts (1 partition, 30 d)
+                                                                                           └─► telegram-alerts ─► Telegram
+```
+
+- **Broker**: one `apache/kafka:4.3.2` container in KRaft mode (broker + controller),
+  replication factor 1, data in the `kafka-data` volume. The listener `kafka:9092` exists
+  only inside the Compose network; no port is published on the laptop. Topics are not
+  auto-created: `kafka-init` creates them (idempotent, `--if-not-exists`) and re-applies
+  `retention.ms` and `segment.ms=1 day` on every `up`.
+- **Consumer groups**: `bq-loader` (bq-consumer), `alert-engine`, `telegram-bot`
+  (telegram-alerts). All commit offsets only after their side effect finished (BigQuery
+  load / alert state written / Telegram accepted the message): at-least-once.
+- **bq-consumer** buffers messages per `run_id` and loads a run when all
+  `run_expected_messages` arrived, or 120 s after its last message (partial run). Invalid
+  messages are logged and skipped. A complete run uses the same load-job ids as the
+  Phase 2 loader (`raw_<table>_<run_id>_<n>`), so a replay is rejected by BigQuery instead
+  of duplicating rows; staging also dedupes on `message_id`.
+- **alert-engine** notices a closed run, checks `ops.ingest_runs` (partial runs are
+  ignored), waits until `dbt build` has rebuilt the marts from that run (or a newer
+  one), and then runs the lifecycle of `config/alerts.yaml`. Write order: `alert_notifications`
+  → `weather.alerts` → `alert_state` → offset commit. Every id is deterministic, so a
+  crash at any point only leads to a re-publish of the same `notification_id`, which the
+  bot drops via `ops.alert_deliveries`.
+- Healthchecks: `kafka` asks the broker for its API versions. The two consumers touch a
+  heartbeat file in every poll loop; the container is unhealthy if it is older than 2 min.
+
+### 7.1 Logs and consumer lag
+
+```powershell
+docker compose logs -f bq-consumer alert-engine telegram-alerts
+# Lag per partition (CURRENT-OFFSET vs LOG-END-OFFSET). The CLI starts its own JVM, so
+# give it a small heap instead of the broker's 512 MB:
+docker compose exec -e KAFKA_HEAP_OPTS=-Xmx128m kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --all-groups
+# Topics and their settings:
+docker compose exec -e KAFKA_HEAP_OPTS=-Xmx128m kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe
+# Peek at the last alerts (read-only; uses a throw-away consumer group):
+docker compose exec -e KAFKA_HEAP_OPTS=-Xmx128m kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic weather.alerts --from-beginning --max-messages 5 --property print.key=true
+```
+
+`LAG` should be 0 a few minutes after each hourly run. A growing lag on `bq-loader`
+means BigQuery loads are failing (see its log; usually credentials, §1.3); the
+`wait_raw_loaded` task then fails and sends the Telegram failure message.
+
+### 7.2 Replay
+
+Stop the consumer first: offsets of a group can only be reset while it has no members.
+
+```powershell
+docker compose stop bq-consumer
+# Dry run first (shows the new offsets), then the same command with --execute:
+docker compose exec -e KAFKA_HEAP_OPTS=-Xmx128m kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group bq-loader --topic weather.raw --reset-offsets --to-datetime 2026-11-05T00:00:00.000 --dry-run
+docker compose exec -e KAFKA_HEAP_OPTS=-Xmx128m kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group bq-loader --topic weather.raw --reset-offsets --to-datetime 2026-11-05T00:00:00.000 --execute
+docker compose start bq-consumer
+```
+
+- `--to-datetime` is UTC; `--to-earliest` replays everything still retained (7 days).
+- Replaying `bq-loader` is safe: whole runs hit the deterministic job ids (no new rows);
+  any other duplicates are removed by dbt staging on `message_id`.
+- Replaying `alert-engine` is safe: it only evaluates the **current** marts once, and
+  rows already applied are skipped (`last_seen_run_id`), so nothing is announced twice.
+- Replaying `telegram-bot` re-reads `weather.alerts`; the bot skips notifications already in
+  `ops.alert_deliveries` and drops ones older than `delivery.max_notification_age_minutes`.
+- "Stop a consumer, start it again, no data loss": stop `bq-consumer` for an hour or two;
+  the next `wait_raw_loaded` fails (expected), and after `docker compose start bq-consumer`
+  it loads the backlog from its committed offset. The next hourly run then builds normally.
+
+### 7.3 Reset Kafka completely
+
+`docker compose down` keeps the `kafka-data` volume. To start from empty topics (all
+retained messages and committed offsets are lost; BigQuery is not touched):
+
+```powershell
+docker compose stop kafka bq-consumer alert-engine telegram-alerts
+docker compose rm -f kafka
+docker volume rm alacati-hava_kafka-data
+docker compose up -d
+```
