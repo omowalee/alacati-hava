@@ -5,6 +5,7 @@ description = "Open-Meteo forecast + marine ingestion into BigQuery for the Ã‡eÅ
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "google-cloud-bigquery>=3.27",
+    "confluent-kafka>=2.6",
     "httpx>=0.28",
     "jsonschema[format-nongpl]>=4.23",
     "python-dotenv>=1.0",

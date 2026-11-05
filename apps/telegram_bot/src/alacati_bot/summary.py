@@ -181,15 +181,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         store = BigQueryStore(env, cfg.params)
         now = datetime.now(UTC)
         if args.dry_run:
-            code = run_summary(store, None, cfg, env.chat_id or "", now, dry_run=True)
-        elif not env.token or not env.chat_id:
-            log.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required")
+            code = run_summary(store, None, cfg, env.broadcast_chat_id or "", now, dry_run=True)
+        elif not env.token or not env.broadcast_chat_id:
+            log.error(
+                "TELEGRAM_BOT_TOKEN and TELEGRAM_BROADCAST_CHAT_ID (or TELEGRAM_CHAT_ID) "
+                "are required"
+            )
         else:
             code = run_summary(
                 store,
                 TelegramSender(env.token, cfg.params.telegram_timeout_s),
                 cfg,
-                env.chat_id,
+                env.broadcast_chat_id,
                 now,
             )
     except Exception:

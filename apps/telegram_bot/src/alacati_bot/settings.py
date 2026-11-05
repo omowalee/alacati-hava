@@ -25,6 +25,12 @@ def config_dir() -> Path:
     return Path(env) if env else DEFAULT_CONFIG_DIR
 
 
+def contracts_dir() -> Path:
+    """Contracts directory: ALACATI_CONTRACTS_DIR, else the `contracts` sibling of config/."""
+    env = os.environ.get("ALACATI_CONTRACTS_DIR")
+    return Path(env) if env else config_dir().parent / "contracts"
+
+
 def _load_yaml(directory: Path, name: str) -> dict[str, Any]:
     with (directory / name).open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
@@ -100,6 +106,10 @@ class BotConfig:
         return {r["id"]: r["name"] for r in self.locations["regions"]}
 
     @property
+    def max_notification_age_minutes(self) -> float:
+        return float(self.alerts["delivery"]["max_notification_age_minutes"])
+
+    @property
     def disclaimer(self) -> str:
         return " ".join(str(self.alerts["disclaimer_tr"]).split())
 
@@ -137,6 +147,13 @@ class Env:
     ops_dataset: str
     token: str | None
     chat_id: str | None
+    broadcast_chat: str | None = None
+    kafka_bootstrap: str | None = None
+
+    @property
+    def broadcast_chat_id(self) -> str | None:
+        """Chat for alerts and the morning summary; falls back to TELEGRAM_CHAT_ID."""
+        return self.broadcast_chat or self.chat_id
 
 
 def load_settings() -> Env:
@@ -149,4 +166,6 @@ def load_settings() -> Env:
         ops_dataset=g("BQ_DATASET_OPS", "alacati_ops") or "alacati_ops",
         token=g("TELEGRAM_BOT_TOKEN"),
         chat_id=g("TELEGRAM_CHAT_ID"),
+        broadcast_chat=g("TELEGRAM_BROADCAST_CHAT_ID") or None,
+        kafka_bootstrap=g("KAFKA_BOOTSTRAP_SERVERS") or None,
     )

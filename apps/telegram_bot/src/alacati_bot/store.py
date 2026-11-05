@@ -187,3 +187,37 @@ class BigQueryStore:
             bigquery.ScalarQueryParameter("run", "STRING", forecast_run_id),
         ]
         self._run(sql, params)
+
+    # --- ops.alert_deliveries (never cached) ----------------------------------------
+
+    def alert_delivered(self, notification_id: str, chat_id: str) -> bool:
+        sql = (
+            "SELECT COUNT(*) AS n "
+            f"FROM {self._ops('alert_deliveries')} "
+            "WHERE notification_id = @n AND chat_id = @c"
+        )
+        params = [
+            bigquery.ScalarQueryParameter("n", "STRING", notification_id),
+            bigquery.ScalarQueryParameter("c", "STRING", chat_id),
+        ]
+        return int(self._run(sql, params)[0]["n"]) > 0
+
+    def record_alert_delivery(
+        self, notification_id: str, chat_id: str, sent_at: datetime, message_id: int | None
+    ) -> None:
+        sql = (
+            f"MERGE {self._ops('alert_deliveries')} T "
+            "USING (SELECT @n AS notification_id, @c AS chat_id, @ts AS sent_at, "
+            "@mid AS telegram_message_id) S "
+            "ON T.notification_id = S.notification_id AND T.chat_id = S.chat_id "
+            "WHEN NOT MATCHED THEN INSERT "
+            "(notification_id, chat_id, sent_at, telegram_message_id) "
+            "VALUES (S.notification_id, S.chat_id, S.sent_at, S.telegram_message_id)"
+        )
+        params = [
+            bigquery.ScalarQueryParameter("n", "STRING", notification_id),
+            bigquery.ScalarQueryParameter("c", "STRING", chat_id),
+            bigquery.ScalarQueryParameter("ts", "TIMESTAMP", sent_at),
+            bigquery.ScalarQueryParameter("mid", "INT64", message_id),
+        ]
+        self._run(sql, params)

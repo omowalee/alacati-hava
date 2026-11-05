@@ -9,14 +9,17 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "tzdata>=2024.1",
+    "confluent-kafka>=2.6",
+    "jsonschema[format-nongpl]>=4.23",
 ]
 
 [project.scripts]
 alacati-bot = "alacati_bot.bot:main"
 alacati-bot-summary = "alacati_bot.summary:main"
+alacati-bot-alerts = "alacati_bot.listener:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "types-PyYAML"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "types-PyYAML", "types-jsonschema"]
 
 [build-system]
 requires = ["hatchling"]
