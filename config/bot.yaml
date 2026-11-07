@@ -25,6 +25,22 @@ summary:
   stale_after_local_hour: 12      # a missed 08:00 summary is not sent after this hour
   record_retries: 4               # retries for writing ops.summary_log after a successful send
   record_backoff_s: 5
+  # Before a summary (morning or night) is sent, the Airflow DAG waits until the newest
+  # forecast in the marts was fetched at most this many minutes ago (e.g. after the laptop
+  # slept, the hourly ingest catches up first). If it never gets fresh, the summary is
+  # sent anyway, with the "veri eski" warning.
+  fresh_max_age_minutes: 90
+
+night:                            # 21:30 night summary ("bu gece ne olacak")
+  end_local_hour: 8               # the night window runs from the next full hour to 08:00
+  earliest_local_hour: 18         # a night summary is never sent before this local hour
+  quiet_wind_max_kmh: 29          # "sakin gece" only if the strongest mean wind stays below this
+  quiet_gust_max_kmh: 50          # ... and the strongest gust stays below this
+  wind_bins:                      # strongest mean wind of the night (km/h), upper bound exclusive
+    - { max_kmh: 12,   label: "Sakin",           emoji: "😌" }   # Beaufort 0-2
+    - { max_kmh: 29,   label: "Hafif rüzgâr",    emoji: "🍃" }   # Beaufort 3-4
+    - { max_kmh: 50,   label: "Rüzgârlı",        emoji: "💨" }   # Beaufort 5-6
+    - { max_kmh: null, label: "Kuvvetli rüzgâr", emoji: "🌬️" }   # Beaufort 7+
 
 data:
   max_age_hours: 3                # latest forecast older than this -> "veri eski" warning

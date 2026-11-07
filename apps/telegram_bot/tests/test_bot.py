@@ -42,8 +42,10 @@ class FakeStore:
         self.fetched: datetime | None = kw.get("fetched", FRESH)
         self.record_failures: int = kw.get("record_failures", 0)  # -1 = always fail
         self.record_calls = 0
-        self.sent: set[tuple[date, str]] = set()
+        self.rain: list[Row] = kw.get("rain", [])
+        self.sent: set[tuple[date, str, str]] = set()
         self.records: list[tuple[date, str, int | None, str]] = []
+        self.kinds: list[str] = []
         self.beach_days: list[date] = []
 
     def active_alerts(self) -> list[Row]:
@@ -63,7 +65,7 @@ class FakeStore:
         return self.windows
 
     def rain_hours(self, start_utc: datetime, end_utc: datetime) -> list[Row]:
-        return []
+        return self.rain
 
     def forecast_run_id(self) -> str | None:
         return self.run_id
@@ -71,8 +73,8 @@ class FakeStore:
     def latest_fetched_at(self) -> datetime | None:
         return self.fetched
 
-    def summary_sent(self, summary_date: date, chat_id: str) -> bool:
-        return (summary_date, chat_id) in self.sent
+    def summary_sent(self, summary_date: date, chat_id: str, kind: str) -> bool:
+        return (summary_date, chat_id, kind) in self.sent
 
     def record_summary(
         self,
@@ -81,11 +83,13 @@ class FakeStore:
         sent_at: datetime,
         message_id: int | None,
         forecast_run_id: str,
+        kind: str,
     ) -> None:
         self.record_calls += 1
         if self.record_failures < 0 or self.record_calls <= self.record_failures:
             raise RuntimeError("bigquery down")
-        self.sent.add((summary_date, chat_id))
+        self.sent.add((summary_date, chat_id, kind))
+        self.kinds.append(kind)
         self.records.append((summary_date, chat_id, message_id, forecast_run_id))
 
 

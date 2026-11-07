@@ -155,7 +155,7 @@ def help_text(cfg: BotConfig, now_local: datetime | None = None) -> str:
         "/sorf – sörf / kite için uygun saatler (/surf da çalışır)\n"
         "/yagis – bugün ve yarın yağış durumu (/yagmur da çalışır)\n"
         "/yardim – bu mesaj\n\n"
-        "Her sabah günlük özet gönderilir."
+        "Her sabah 08:00'de günlük özet, her akşam 21:30'da gece özeti gönderilir."
     )
     return with_footer(body, cfg)
 

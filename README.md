@@ -9,7 +9,7 @@ locals and visitors actually ask about:
 2. **Beach recommendation** — which beach is most sheltered from today's wind.
 3. **Surf / kite windows** — when the wind at Alaçatı enters a rideable range.
 
-Delivered through a **Telegram bot** (08:00 morning summary, instant alerts, `/uyari`,
+Delivered through a **Telegram bot** (08:00 morning summary, 21:30 night summary, instant alerts, `/uyari`,
 `/plaj`, `/ruzgar`) and a **Streamlit dashboard**.
 
 > Personal, non-commercial portfolio project. Based on model forecasts — for official
@@ -40,11 +40,11 @@ flowchart LR
     AE -->|state| OPS[(BigQuery<br/>alacati_ops)]
     AE -->|weather.alerts| K
     K --> TA[telegram-alerts]
-    M --> BOT[Telegram bot<br/>commands + 08:00 summary]
+    M --> BOT[Telegram bot<br/>commands + 08:00 / 21:30 summaries]
     M --> ST[Streamlit dashboard]
     AF[Airflow<br/>LocalExecutor] -. schedules .-> P
     AF -. waits for load, then .-> DBT
-    AF -. 08:00 .-> BOT
+    AF -. 08:00, 21:30 .-> BOT
 ```
 
 | Layer | What runs | Notes |
@@ -53,7 +53,7 @@ flowchart LR
 | Streaming | `streaming/` — `bq-consumer`, `alert-engine` | Offsets are committed only after the side effect succeeded (at-least-once); deterministic BigQuery job ids and notification ids make replays harmless. |
 | Warehouse | BigQuery (EU) | Batch load jobs only (no streaming inserts), tables partitioned by date and clustered by location. |
 | Transformations | `dbt/` | Staging → marts with **enforced model contracts**, 52 data tests and 11 unit tests. Alert rules and the beach score are SQL. |
-| Orchestration | `orchestration/` — Airflow 3 | `weather_hourly` (ingest → wait until loaded → dbt build → freshness), `morning_summary`, weekly maintenance, Telegram message on failure. |
+| Orchestration | `orchestration/` — Airflow 3 | `weather_hourly` (ingest → wait until loaded → dbt build → freshness), `morning_summary` and `night_summary` (wait for fresh data, then send once a day), weekly maintenance, Telegram message on failure. |
 | Apps | `apps/telegram_bot/`, `apps/streamlit/` | Read only the small mart tables. Turkish UI. |
 
 ### An honest note on scale

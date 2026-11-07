@@ -15,7 +15,7 @@ spots on the Çeşme peninsula and offers:
 2. **Beach recommendation** — ranks beaches by shelter from the current wind.
 3. **Surf/kite conditions** — when Alaçatı wind enters the rideable range.
 
-Channels: Telegram bot (08:00 morning summary + instant alerts, commands
+Channels: Telegram bot (08:00 morning summary, 21:30 night summary + instant alerts, commands
 `/uyari`, `/plaj`, `/ruzgar`) and a Streamlit dashboard on Community Cloud.
 
 Out of scope: sea temperature, sunset score, event risk report, forecast verification.
@@ -29,7 +29,7 @@ Open-Meteo (forecast + marine, hourly)
                                  ├─ streaming/ bq consumer ──► BigQuery alacati_raw (load jobs / Storage Write API)
                                  └─ streaming/ alert engine ──► Kafka topic weather.alerts ──► Telegram bot
 BigQuery (EU): alacati_raw → dbt (alacati_staging → alacati_marts), alacati_ops (call log, alert state)
-Airflow (LocalExecutor + Postgres): hourly ingest, dbt build, morning summary
+Airflow (LocalExecutor + Postgres): hourly ingest, dbt build, morning + night summary
 Streamlit: reads only small mart tables, with caching
 ```
 - Kafka: single broker, KRaft, official `apache/kafka` image, heap 512 MB.
@@ -70,7 +70,7 @@ tests/
 9. Every alert message and the dashboard carry the disclaimer: personal project based on
    model forecasts; for official warnings see MGM (Meteoroloji Genel Müdürlüğü).
    Exceptions (Numan, 2026-11-05): `/sorf` and the Streamlit dashboard show only the CC BY
-   attribution line, no disclaimer. Alert messages and the morning summary keep it.
+   attribution line, no disclaimer. Alert messages and the morning and night summaries keep it.
 
 ## Agents
 - `data-engineer`, `debugger` → opus; `python-pro`, `sql-pro`, `code-reviewer` → sonnet.

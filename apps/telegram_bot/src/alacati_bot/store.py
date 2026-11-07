@@ -129,10 +129,14 @@ class BigQueryStore:
         return self._cached(("windows", spot_id, hours), sql, params)
 
     def rain_hours(self, start_utc: datetime, end_utc: datetime) -> list[Row]:
-        """Hourly rain rows per location with start_utc <= time_utc <= end_utc (inclusive)."""
+        """Hourly rain + wind rows per location, start_utc <= time_utc <= end_utc (inclusive).
+
+        Used by /yagis (rain columns) and the night summary (rain and wind columns).
+        """
         sql = (
             "SELECT region_id, location_id, time_utc, precipitation, "
-            "precipitation_probability, weather_code "
+            "precipitation_probability, weather_code, wind_speed_10m, wind_gusts_10m, "
+            "wind_direction_10m "
             f"FROM {self._marts('mart_location_weather_hourly')} "
             "WHERE time_utc >= @t0 AND time_utc <= @t1 ORDER BY time_utc, location_id"
         )
@@ -164,15 +168,18 @@ class BigQueryStore:
 
     # --- ops.summary_log (never cached) ---------------------------------------------
 
-    def summary_sent(self, summary_date: date, chat_id: str) -> bool:
+    def summary_sent(self, summary_date: date, chat_id: str, kind: str) -> bool:
+        # Rows written before summary_kind existed are morning summaries (NULL = 'morning').
         sql = (
             "SELECT COUNT(*) AS n "
             f"FROM {self._ops('summary_log')} "
-            "WHERE summary_date = @d AND chat_id = @c"
+            "WHERE summary_date = @d AND chat_id = @c "
+            "AND COALESCE(summary_kind, 'morning') = @k"
         )
         params = [
             bigquery.ScalarQueryParameter("d", "DATE", summary_date),
             bigquery.ScalarQueryParameter("c", "STRING", chat_id),
+            bigquery.ScalarQueryParameter("k", "STRING", kind),
         ]
         return int(self._run(sql, params)[0]["n"]) > 0
 
@@ -183,16 +190,19 @@ class BigQueryStore:
         sent_at: datetime,
         message_id: int | None,
         forecast_run_id: str,
+        kind: str,
     ) -> None:
         sql = (
             f"MERGE {self._ops('summary_log')} T "
             "USING (SELECT @d AS summary_date, @c AS chat_id, @ts AS sent_at, "
-            "@mid AS telegram_message_id, @run AS forecast_run_id) S "
+            "@mid AS telegram_message_id, @run AS forecast_run_id, @k AS summary_kind) S "
             "ON T.summary_date = S.summary_date AND T.chat_id = S.chat_id "
+            "AND COALESCE(T.summary_kind, 'morning') = S.summary_kind "
             "WHEN NOT MATCHED THEN INSERT "
-            "(summary_date, chat_id, sent_at, telegram_message_id, forecast_run_id) "
+            "(summary_date, chat_id, sent_at, telegram_message_id, forecast_run_id, "
+            "summary_kind) "
             "VALUES (S.summary_date, S.chat_id, S.sent_at, S.telegram_message_id, "
-            "S.forecast_run_id)"
+            "S.forecast_run_id, S.summary_kind)"
         )
         params = [
             bigquery.ScalarQueryParameter("d", "DATE", summary_date),
@@ -200,6 +210,7 @@ class BigQueryStore:
             bigquery.ScalarQueryParameter("ts", "TIMESTAMP", sent_at),
             bigquery.ScalarQueryParameter("mid", "INT64", message_id),
             bigquery.ScalarQueryParameter("run", "STRING", forecast_run_id),
+            bigquery.ScalarQueryParameter("k", "STRING", kind),
         ]
         self._run(sql, params)
 

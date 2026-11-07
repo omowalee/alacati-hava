@@ -91,11 +91,11 @@ tables:
   - name: summary_log
     dataset: ops
     schema: ops/summary_log.json
-    grain: one morning summary per local date per chat
-    unique_key: [summary_date, chat_id]
+    grain: one summary per kind (morning / night) per local date per chat
+    unique_key: [summary_date, chat_id, summary_kind]
     partition: { field: summary_date, type: DAY }
     cluster_by: [chat_id]
-    notes: An Airflow retry checks this table first, so the summary is sent once a day.
+    notes: An Airflow retry checks this table first, so each summary kind is sent once a day.
 
   # --- marts (built by dbt) -----------------------------------------------------
   - name: mart_location_weather_hourly

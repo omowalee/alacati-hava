@@ -3,7 +3,7 @@
     "name": "summary_date",
     "type": "DATE",
     "mode": "REQUIRED",
-    "description": "Local (Europe/Istanbul) date of the morning summary"
+    "description": "Local (Europe/Istanbul) date the summary was sent"
   },
   {
     "name": "chat_id",
@@ -28,5 +28,11 @@
     "type": "STRING",
     "mode": "REQUIRED",
     "description": "Run the summary was built from"
+  },
+  {
+    "name": "summary_kind",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "'morning' (08:00) or 'night' (21:30). NULLABLE only because the column was added later (2026-11-07); rows written before were backfilled with 'morning'. Readers treat NULL as 'morning'."
   }
 ]

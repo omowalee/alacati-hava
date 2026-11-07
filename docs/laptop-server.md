@@ -30,12 +30,17 @@ DAGs (`orchestration/dags/`, times in UTC unless stated):
   `bq-consumer` has loaded every published message of that run (fails after 10 min,
   which sends the failure message). Ingest exit code 2 (partial) logs a warning and dbt
   still runs. Exit code 1 fails the task. Freshness only warns and never fails the run.
-- `morning_summary`: runs at 08:00 Europe/Istanbul. It sends the Telegram morning summary,
-  which is idempotent through `alacati_ops.summary_log`. Scheduled runs are skipped after
-  `summary.stale_after_local_hour` in `config/bot.yaml` (12:00 local time), and also when
-  the run slot belongs to an earlier day. Exit code 3 of `alacati-bot-summary` ("sent, but
-  the summary_log write failed") counts as success with a warning and is never retried,
-  because a retry would send the message twice.
+- `morning_summary` (08:00 Europe/Istanbul) and `night_summary` (21:30: rain, wind and
+  alerts until 08:00, or "sakin bir gece"): `wait_fresh` → `send_summary`, built by
+  `summary_dag.py`. `wait_fresh` waits (up to 30 min) until the newest forecast in the
+  marts is at most `summary.fresh_max_age_minutes` old, so after the laptop slept the
+  hourly ingest catches up before the summary is built; if it never gets fresh, the
+  summary still goes out with the "veri eski" warning. Each kind is sent once per local
+  day (idempotent through `alacati_ops.summary_log`, key `summary_date, chat_id,
+  summary_kind`). Scheduled runs are skipped when the run slot belongs to an earlier day,
+  and the morning one also after `summary.stale_after_local_hour` (12:00). Exit code 3 of
+  `alacati-bot-summary` ("sent, but the summary_log write failed") counts as success with
+  a warning and is never retried, because a retry would send the message twice.
 - `airflow_maintenance`: Sundays 02:30 UTC. `airflow db clean` for metadata older than
   30 days (no archive tables) and deletes task log files older than 30 days.
 

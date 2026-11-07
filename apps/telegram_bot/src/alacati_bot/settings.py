@@ -78,6 +78,49 @@ class RainParams:
 
 
 @dataclass(frozen=True)
+class WindBin:
+    """One bin of config/bot.yaml night.wind_bins (upper bound exclusive, km/h)."""
+
+    max_kmh: float | None  # None = open-ended last bin
+    label: str
+    emoji: str
+
+
+@dataclass(frozen=True)
+class NightParams:
+    """The night: section of config/bot.yaml (21:30 night summary)."""
+
+    end_local_hour: int
+    earliest_local_hour: int
+    quiet_wind_max_kmh: float
+    quiet_gust_max_kmh: float
+    wind_bins: tuple[WindBin, ...]
+
+    @classmethod
+    def from_yaml(cls, data: dict[str, Any]) -> NightParams:
+        bins = tuple(
+            WindBin(
+                None if b["max_kmh"] is None else float(b["max_kmh"]),
+                str(b["label"]),
+                str(b["emoji"]),
+            )
+            for b in data["wind_bins"]
+        )
+        if not bins or bins[-1].max_kmh is not None:
+            raise ValueError("night.wind_bins must end with max_kmh: null")
+        end, earliest = int(data["end_local_hour"]), int(data["earliest_local_hour"])
+        if not (0 <= end <= 23 and 0 <= earliest <= 23):
+            raise ValueError("night.end_local_hour / earliest_local_hour must be 0..23")
+        return cls(
+            end_local_hour=end,
+            earliest_local_hour=earliest,
+            quiet_wind_max_kmh=float(data["quiet_wind_max_kmh"]),
+            quiet_gust_max_kmh=float(data["quiet_gust_max_kmh"]),
+            wind_bins=bins,
+        )
+
+
+@dataclass(frozen=True)
 class BotParams:
     """Parameters from config/bot.yaml."""
 
@@ -98,6 +141,8 @@ class BotParams:
     telegram_max_chars: int
     telegram_timeout_s: float
     rain: RainParams
+    night: NightParams
+    fresh_max_age_minutes: float
 
     @classmethod
     def from_yaml(cls, data: dict[str, Any]) -> BotParams:
@@ -121,6 +166,8 @@ class BotParams:
             telegram_max_chars=int(lim["telegram_max_chars"]),
             telegram_timeout_s=float(lim.get("telegram_timeout_s", 30)),
             rain=RainParams.from_yaml(data["rain"]),
+            night=NightParams.from_yaml(data["night"]),
+            fresh_max_age_minutes=float(s["fresh_max_age_minutes"]),
         )
 
 

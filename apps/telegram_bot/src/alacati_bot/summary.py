@@ -1,4 +1,5 @@
-"""Morning summary: send once per local day, idempotent via ops.summary_log."""
+"""Morning (08:00) and night (21:30) summaries: each kind is sent at most once per local
+day, idempotent via ops.summary_log (unique key: summary_date, chat_id, summary_kind)."""
 
 from __future__ import annotations
 
@@ -8,24 +9,29 @@ import logging
 import sys
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
-from typing import Protocol
+from datetime import UTC, date, datetime, timedelta
+from typing import Literal, Protocol
 
 from . import settings
 from .formatting import TZ
 from .messages import DataStore, format_summary, stale_notice, truncate_message, with_notice
+from .night import format_night, night_window, query_range
 
 log = logging.getLogger("alacati_bot.summary")
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_SENT_NOT_RECORDED = 3  # sent to Telegram, summary_log write failed; do NOT retry
+EXIT_NOT_FRESH = 4  # --check-fresh: the newest forecast is older than fresh_max_age_minutes
+
+Kind = Literal["morning", "night"]
+KINDS: tuple[Kind, ...] = ("morning", "night")
 
 
 class SummaryStore(DataStore, Protocol):
     """DataStore plus summary_log access."""
 
-    def summary_sent(self, summary_date: date, chat_id: str) -> bool: ...
+    def summary_sent(self, summary_date: date, chat_id: str, kind: str) -> bool: ...
     def record_summary(
         self,
         summary_date: date,
@@ -33,6 +39,7 @@ class SummaryStore(DataStore, Protocol):
         sent_at: datetime,
         message_id: int | None,
         forecast_run_id: str,
+        kind: str,
     ) -> None: ...
 
 
@@ -57,10 +64,56 @@ def build_summary(store: DataStore, cfg: settings.BotConfig, now_local: datetime
     return truncate_message(with_notice(body, stale_notice(store, cfg, now_local)), cfg)
 
 
+def build_night(store: DataStore, cfg: settings.BotConfig, now_local: datetime) -> str:
+    """Collect mart data and render the night summary (stale warning first, if any)."""
+    start, end = night_window(now_local, cfg)
+    body = format_night(
+        store.rain_hours(*query_range(start, end)),
+        store.active_alerts(),
+        store.upcoming_events(cfg.horizon_hours),
+        cfg,
+        now_local,
+    )
+    return truncate_message(with_notice(body, stale_notice(store, cfg, now_local)), cfg)
+
+
+def build(kind: Kind, store: DataStore, cfg: settings.BotConfig, now_local: datetime) -> str:
+    if kind == "night":
+        return build_night(store, cfg, now_local)
+    return build_summary(store, cfg, now_local)
+
+
+def out_of_hours(kind: Kind, cfg: settings.BotConfig, now_local: datetime) -> str | None:
+    """Why this kind must not be sent at now_local, or None if it may be sent."""
+    if kind == "morning" and now_local.hour >= cfg.params.summary_stale_after_hour:
+        return f"too late ({now_local:%H:%M}) for the morning summary"
+    if kind == "night" and now_local.hour < cfg.params.night.earliest_local_hour:
+        return f"too early ({now_local:%H:%M}) for the night summary"
+    return None
+
+
+def check_fresh(store: DataStore, cfg: settings.BotConfig, now_utc: datetime) -> int:
+    """EXIT_OK if the newest forecast was fetched within fresh_max_age_minutes, else
+    EXIT_NOT_FRESH (also when no fetch time is known)."""
+    fetched = store.latest_fetched_at()
+    limit = timedelta(minutes=cfg.params.fresh_max_age_minutes)
+    if fetched is None:
+        log.info("no forecast fetch time in the marts yet")
+        return EXIT_NOT_FRESH
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=UTC)
+    age = now_utc - fetched
+    if age > limit:
+        log.info("newest forecast is %s old (limit %s): not fresh yet", age, limit)
+        return EXIT_NOT_FRESH
+    log.info("newest forecast is %s old: fresh", age)
+    return EXIT_OK
+
+
 def _record_with_retries(
     store: SummaryStore,
     cfg: settings.BotConfig,
-    args: tuple[date, str, datetime, int | None, str],
+    args: tuple[date, str, datetime, int | None, str, str],
     sleep: Callable[[float], None],
 ) -> bool:
     """Write summary_log, retrying record_retries times after the first failure."""
@@ -85,8 +138,9 @@ def run_summary(
     now_utc: datetime,
     dry_run: bool = False,
     sleep: Callable[[float], None] = time.sleep,
+    kind: Kind = "morning",
 ) -> int:
-    """Send today's summary at most once.
+    """Send today's summary of this kind at most once.
 
     Returns the exit code: 0 sent / already sent / too late to send; 1 error (nothing was
     sent, safe to retry); 3 sent but summary_log could not be written (do NOT retry: a retry
@@ -96,29 +150,31 @@ def run_summary(
     now_local = now_utc.astimezone(TZ).replace(tzinfo=None)
     day = now_local.date()
     if dry_run:
-        print(build_summary(store, cfg, now_local))
+        print(build(kind, store, cfg, now_local))
         return EXIT_OK
     if sender is None:
         log.error("no sender configured")
         return EXIT_ERROR
-    if store.summary_sent(day, chat_id):
-        log.info("summary for %s already sent; nothing to do", day)
+    if store.summary_sent(day, chat_id, kind):
+        log.info("%s summary for %s already sent; nothing to do", kind, day)
         return EXIT_OK
-    if now_local.hour >= cfg.params.summary_stale_after_hour:
-        log.warning("summary for %s missed; too late (%s) to send", day, f"{now_local:%H:%M}")
+    reason = out_of_hours(kind, cfg, now_local)
+    if reason:
+        log.warning("%s summary for %s not sent: %s", kind, day, reason)
         return EXIT_OK
     run_id = store.forecast_run_id()
     if run_id is None:
         log.error("no forecast_run_id in marts; refusing to send summary")
         return EXIT_ERROR
-    text = build_summary(store, cfg, now_local)
+    text = build(kind, store, cfg, now_local)
     message_id = sender.send(chat_id, text)  # exactly one attempt
-    log.info("summary for %s sent (message_id=%s)", day, message_id)
-    record = (day, chat_id, datetime.now(UTC), message_id, run_id)
+    log.info("%s summary for %s sent (message_id=%s)", kind, day, message_id)
+    record = (day, chat_id, datetime.now(UTC), message_id, run_id, kind)
     if not _record_with_retries(store, cfg, record, sleep):
         log.critical(
-            "summary for %s SENT (message_id=%s) but NOT recorded in summary_log; "
+            "%s summary for %s SENT (message_id=%s) but NOT recorded in summary_log; "
             "a retry would send a duplicate",
+            kind,
             day,
             message_id,
         )
@@ -158,11 +214,18 @@ class TelegramSender:
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Send the morning weather summary once.",
-        epilog="Exit codes: 0 sent / already sent / too late; 1 error (nothing sent, safe to "
-        "retry); 3 sent but not recorded in summary_log (do NOT retry: duplicate risk).",
+        description="Send the morning or night weather summary once.",
+        epilog="Exit codes: 0 sent / already sent / outside its hours; 1 error (nothing sent, "
+        "safe to retry); 3 sent but not recorded in summary_log (do NOT retry: duplicate "
+        "risk). With --check-fresh: 0 fresh, 4 not fresh yet, 1 error.",
     )
+    parser.add_argument("--kind", choices=KINDS, default="morning", help="summary kind")
     parser.add_argument("--dry-run", action="store_true", help="print only; no send, no write")
+    parser.add_argument(
+        "--check-fresh",
+        action="store_true",
+        help="only check that the newest forecast is fresh enough to send (exit 0 / 4)",
+    )
     args = parser.parse_args(argv)
     # Windows consoles default to a legacy code page that cannot print the emoji in the
     # message; Docker is already UTF-8, so this only matters for local --dry-run.
@@ -182,8 +245,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         store = BigQueryStore(env, cfg.params)
         now = datetime.now(UTC)
-        if args.dry_run:
-            code = run_summary(store, None, cfg, env.broadcast_chat_id or "", now, dry_run=True)
+        if args.check_fresh:
+            code = check_fresh(store, cfg, now)
+        elif args.dry_run:
+            code = run_summary(
+                store, None, cfg, env.broadcast_chat_id or "", now, dry_run=True, kind=args.kind
+            )
         elif not env.token or not env.broadcast_chat_id:
             log.error(
                 "TELEGRAM_BOT_TOKEN and TELEGRAM_BROADCAST_CHAT_ID (or TELEGRAM_CHAT_ID) "
@@ -196,8 +263,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 cfg,
                 env.broadcast_chat_id,
                 now,
+                kind=args.kind,
             )
     except Exception:
-        log.exception("morning summary failed")
+        log.exception("%s summary failed", args.kind)
         code = 1
     sys.exit(code)
